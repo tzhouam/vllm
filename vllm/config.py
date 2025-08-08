@@ -839,6 +839,24 @@ class ModelConfig:
     def architecture(self) -> str:
         """The architecture vllm actually used."""
         return self._architecture
+    def is_omni_model(self) -> bool:
+        return self.is_omni_thinker_model() or self.is_omni_talker_model()
+
+    def is_omni_thinker_model(self) -> bool:
+        return self.architectures and self.architectures[0] in [
+            "Qwen2OmniThinkerForConditionalGeneration",
+            "Qwen2OmniNaViTThinkerForConditionalGeneration",
+            "Qwen2_5OmniModel",
+            'Qwen2_5OmniThinkerModel',
+            'Qwen2_5OmniMergedModel',
+        ]
+
+    def is_omni_talker_model(self) -> bool:
+        return self.architectures and self.architectures[0] in [
+            "Qwen2OmniTalkerForConditionalGeneration",
+            "Qwen2OmniNaViTTalkerForConditionalGeneration",
+            "Qwen2_5OmniTalkerModel",
+        ]
 
     def maybe_pull_model_tokenizer_for_s3(self, model: str,
                                           tokenizer: str) -> None:
