@@ -13,6 +13,7 @@ from vllm.transformers_utils.qwen2_code2wav_dit.model.utils import (
     exists, load_checkpoint)
 from vllm.transformers_utils.qwen2_code2wav_dit.modeling_qwen2_code2wav import (
     Qwen2Code2wavBigvgan)
+from vllm.logger import init_logger
 
 
 class CudaGraphRunner:
@@ -230,6 +231,7 @@ class BatchCodecCFM(CodecCFM):
 
 
 class Qwen2Code2wavDit(torch.nn.Module):
+    logger = init_logger(__name__)
 
     def __init__(self, ckpt, frequency: str = "50hz", device='cpu'):
         super().__init__()
@@ -264,6 +266,15 @@ class Qwen2Code2wavDit(torch.nn.Module):
                                          ckpt,
                                          device,
                                          use_ema=True)
+        try:
+            total_bytes = 0
+            for p in self.parameters():
+                total_bytes += p.numel() * p.element_size()
+            self.logger.info(
+                "[Model Loaded] name=%s, success=%s, size=%.2f MB, device=%s",
+                self.__class__.__name__, True, total_bytes / (1024**2), str(self.device))
+        except Exception:
+            pass
 
     def sample(self,
                cond,
@@ -312,6 +323,7 @@ class Qwen2Code2wavDit(torch.nn.Module):
 
 
 class Qwen2Code2wav(torch.nn.Module):
+    logger = init_logger(__name__)
 
     def __init__(self,
                  dit_ckpt,
@@ -334,6 +346,16 @@ class Qwen2Code2wav(torch.nn.Module):
             frequency=frequency,
             device=device,
             with_weight_norm=with_weight_norm)
+        try:
+            total_bytes = 0
+            for m in [self.code2wav_dit_model, self.code2wav_bigvgan_model]:
+                for p in m.parameters():
+                    total_bytes += p.numel() * p.element_size()
+            self.logger.info(
+                "[Model Loaded] name=%s, success=%s, size=%.2f MB, device=%s",
+                self.__class__.__name__, True, total_bytes / (1024**2), str(self.device))
+        except Exception:
+            pass
         self.device = device
 
         # odeint method: use ruler for first and last chunk to optimize performance

@@ -38,6 +38,7 @@ from vllm.model_executor.models.qwen2_5_omni_thinker import (
     Qwen2_5OmniThinkerProcessingInfo,
     Qwen2_5OmniThinkerDummyInputsBuilder)
 from vllm.multimodal import MULTIMODAL_REGISTRY
+from vllm.logger import init_logger
 from vllm.sequence import IntermediateTensors
 
 from .interfaces import SupportsMultiModal, SupportsPP
@@ -53,6 +54,7 @@ from .utils import (AutoWeightsLoader, WeightsMapper,
 class Qwen2_5OmniTalkerForConditionalGeneration(nn.Module, SupportsMultiModal,
                                                 SupportsPP,
                                                 Qwen2_5OmniConditionalGenerationMixin):
+    logger = init_logger(__name__)
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
@@ -157,4 +159,17 @@ class Qwen2_5OmniTalkerForConditionalGeneration(nn.Module, SupportsMultiModal,
             self,
             skip_prefixes=['thinker.', 'token2wav.'],
         )
-        return loader.load_weights(weights, mapper=hf_to_vllm_mapper)
+        loaded = loader.load_weights(weights, mapper=hf_to_vllm_mapper)
+        # Log load summary
+        try:
+            total_bytes = 0
+            for name, param in self.named_parameters():
+                if param is not None and param.data is not None:
+                    total_bytes += param.data.numel() * param.data.element_size()
+            device = next(self.parameters()).device
+            self.logger.info(
+                "[Model Loaded] name=%s, success=%s, size=%.2f MB, device=%s",
+                self.__class__.__name__, True, total_bytes / (1024**2), str(device))
+        except Exception:
+            pass
+        return loaded

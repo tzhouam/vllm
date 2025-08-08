@@ -892,5 +892,16 @@ class Qwen2_5OmniThinkerForConditionalGeneration(
         )
         loaded_weights = loader.load_weights(weights,
                                              mapper=self.hf_to_vllm_mapper)
-
+        # Log load summary
+        try:
+            total_bytes = 0
+            for name, param in self.named_parameters():
+                if param is not None and param.data is not None:
+                    total_bytes += param.data.numel() * param.data.element_size()
+            device = next(self.parameters()).device
+            logger.info(
+                "[Model Loaded] name=%s, success=%s, size=%.2f MB, device=%s",
+                self.__class__.__name__, True, total_bytes / (1024**2), str(device))
+        except Exception:
+            pass
         return loaded_weights
