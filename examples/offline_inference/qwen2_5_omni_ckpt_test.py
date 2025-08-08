@@ -5,6 +5,9 @@ End-to-end test example for Qwen2.5-Omni merged model using real checkpoints.
 This script expects a merged checkpoint directory that includes a config.json
 with architectures: ["Qwen2_5OmniMergedModel"], and thinker/talker weights.
 
+It can also automatically download the official model repo from Hugging Face,
+e.g. Qwen/Qwen2.5-Omni-7B, and prepare the directory for you.
+
 It also requires Code2Wav checkpoints (DiT and BigVGAN), or a code2wav model
 folder containing spk_dict.pt. You can provide either individual ckpt files or
 a --code2wav-dir that contains spk_dict.pt and (optionally) model files.
@@ -27,6 +30,16 @@ python examples/offline_inference/qwen2_5_omni_ckpt_test.py \
   --voice-type m02 \
   --code2wav-dir C:\\path\\to\\code2wav_dir \
   --output-wav C:\\path\\to\\output.wav
+
+Auto-download from Hugging Face (Qwen/Qwen2.5-Omni-7B):
+
+python examples/offline_inference/qwen2_5_omni_ckpt_test.py \
+  --hf-hub-id Qwen/Qwen2.5-Omni-7B \
+  --model C:\\models\\Qwen2.5-Omni-7B \
+  --prompt "请用中文介绍一下人工智能的发展历程。" \
+  --voice-type default \
+  --code2wav-dir C:\\models\\Qwen2.5-Omni-7B \
+  --output-wav C:\\temp\\omni_out.wav
 """
 
 import argparse
@@ -34,11 +47,35 @@ import json
 import os
 
 import soundfile as sf
+try:
+    from huggingface_hub import snapshot_download
+    _HF_AVAILABLE = True
+except Exception:
+    _HF_AVAILABLE = False
 import torch
 
 from vllm.engine.async_llm_engine import AsyncLLMEngine, AsyncEngineArgs
 from vllm.sampling_params import SamplingParams
 from vllm.transformers_utils.tokenizer import get_tokenizer
+
+
+def ensure_hf_model(model_dir: str, hf_hub_id: str | None, revision: str | None):
+    """Download model repo from HF into model_dir if needed."""
+    if not hf_hub_id:
+        return
+    if not _HF_AVAILABLE:
+        raise RuntimeError("huggingface_hub is not installed. Please `pip install -U huggingface_hub`." )
+    cfg_path = os.path.join(model_dir, 'config.json')
+    if os.path.isdir(model_dir) and os.path.exists(cfg_path):
+        return  # already prepared
+    os.makedirs(model_dir, exist_ok=True)
+    snapshot_download(
+        repo_id=hf_hub_id,
+        local_dir=model_dir,
+        local_dir_use_symlinks=False,
+        revision=revision,
+        ignore_patterns=['.git/*'],
+    )
 
 
 def ensure_config(model_dir: str, code2wav_dir: str | None, dit_ckpt: str | None, bigvgan_ckpt: str | None):
@@ -82,7 +119,9 @@ def get_model_instance(engine: AsyncLLMEngine):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', required=True, help='Path to merged model directory (with config.json and weights).')
+    parser.add_argument('--model', required=True, help='Path to merged model directory (will be created if downloading).')
+    parser.add_argument('--hf-hub-id', default='Qwen/Qwen2.5-Omni-7B', help='Hugging Face repo id to download if needed.')
+    parser.add_argument('--hf-revision', default=None, help='Optional HF revision (branch/tag/commit).')
     parser.add_argument('--prompt', required=True, help='Input text prompt.')
     parser.add_argument('--voice-type', default='default', help='Voice type, e.g., m02, f030, default.')
     parser.add_argument('--code2wav-dir', default=None, help='Path to code2wav folder (contains spk_dict.pt).')
@@ -93,6 +132,9 @@ def main():
     parser.add_argument('--max-model-len', type=int, default=32768)
     args = parser.parse_args()
 
+    # 1) Download HF model if needed
+    ensure_hf_model(args.model, args.hf_hub_id, args.hf_revision)
+    # 2) Ensure config for merged model + code2wav
     ensure_config(args.model, args.code2wav_dir, args.dit_ckpt, args.bigvgan_ckpt)
 
     # Build engine
