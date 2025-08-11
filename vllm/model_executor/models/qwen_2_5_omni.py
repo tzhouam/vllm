@@ -86,7 +86,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         self.talker_config = talker_config
         
         # Initialize thinker model (multimodal processing)
-        self.thinker_model = init_vllm_registered_model(
+        self.thinker = init_vllm_registered_model(
             vllm_config=vllm_config,
             prefix=maybe_prefix(prefix, "thinker"),
             hf_config=thinker_config,
@@ -95,7 +95,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         )
         
         # Initialize talker model wrapper (handles projection + LM)
-        self.talker_model = init_vllm_registered_model(
+        self.talker = init_vllm_registered_model(
             vllm_config=vllm_config,
             prefix=maybe_prefix(prefix, "talker"),
             hf_config=talker_config,
@@ -104,20 +104,20 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         )
         
         # code2wav: lazy init at first use (not a vLLM architecture)
-        self.code2wav_model = None
-        self.code2wav_config = getattr(config, 'code2wav_config', None)
+        self.token2wav = None
+        self.token2wav_config = getattr(config, 'code2wav_config', None)
         # voice resources (loaded on demand)
         self._code2wav_conds: Dict[str, torch.Tensor] = {}
         self._code2wav_ref_mels: Dict[str, torch.Tensor] = {}
         
         # Set up intermediate tensors
         self.make_empty_intermediate_tensors = (
-            self.thinker_model.make_empty_intermediate_tensors)
+            self.thinker.make_empty_intermediate_tensors)
 
     @cached_property
     def sampler(self):
-        if hasattr(self.thinker_model, "sampler"):
-            return self.thinker_model.sampler
+        if hasattr(self.thinker, "sampler"):
+            return self.thinker.sampler
         return get_sampler()
 
     def get_input_embeddings(
@@ -127,12 +127,12 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         seq_data=None,
     ) -> torch.Tensor:
         # Use thinker model for input embeddings (handles multimodal inputs)
-        return self.thinker_model.get_input_embeddings(
+        return self.thinker.get_input_embeddings(
             input_ids, multimodal_embeddings, seq_data)
 
     def get_multimodal_embeddings(self, **kwargs):
         # Delegate to thinker model for multimodal processing
-        return self.thinker_model.get_multimodal_embeddings(**kwargs)
+        return self.thinker.get_multimodal_embeddings(**kwargs)
 
     def forward(
         self,
@@ -153,7 +153,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         """
         
         # Step 1: Process through thinker model (multimodal understanding)
-        thinker_output = self.thinker_model(
+        thinker_output = self.thinker(
             input_ids=input_ids,
             positions=positions,
             intermediate_tensors=intermediate_tensors,
@@ -179,7 +179,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             dtype=torch.long,
             device=last_hidden_state.device,
         )
-        talker_output = self.talker_model(
+        talker_output = self.talker(
             input_ids=None,
             positions=talker_positions,
             inputs_embeds=last_hidden_state,
@@ -209,7 +209,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             hidden_states = hidden_states.text_hidden_states
         
         # Use thinker model for logits computation
-        return self.thinker_model.compute_logits(hidden_states, sampling_metadata)
+        return self.thinker.compute_logits(hidden_states, sampling_metadata)
 
     def sample(
         self,
@@ -217,7 +217,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[SamplerOutput]:
         # Use thinker model for sampling
-        return self.thinker_model.sample(logits, sampling_metadata)
+        return self.thinker.sample(logits, sampling_metadata)
 
     def generate_speech(self, text_tokens: torch.Tensor, voice_type: str = "default"):
         """
@@ -232,7 +232,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             Audio tensor
         """
         # Generate codec tokens using talker model
-        talker_output = self.talker_model(
+        talker_output = self.talker(
             input_ids=None,
             positions=None,
             inputs_embeds=text_tokens
@@ -251,12 +251,12 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         the specific tokenization logic for your codec.
         """
         # Use talker's LM head to get logits for the last step and greedy-pick
-        if not hasattr(self.talker_model, 'language_model'):
+        if not hasattr(self.talker, 'language_model'):
             # Fallback: return a zero-length codec
             return torch.zeros((talker_output.size(0), 0), dtype=torch.long, device=talker_output.device)
 
         # talker_output: [B, T=1, H] → logits: [B, T=1, V]
-        lm = self.talker_model.language_model
+        lm = self.talker.language_model
         with torch.inference_mode():
             logits = lm.lm_head(talker_output)
         # mask special codec tokens if available
@@ -278,22 +278,22 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
 
     def _init_code2wav_model(self):
         """Initialize the code2wav model and speaker resources lazily."""
-        if self.code2wav_model is None and self.code2wav_config is not None:
+        if self.token2wav is None and self.token2wav_config is not None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            self.code2wav_model = Qwen2Code2wav(
-                dit_ckpt=self.code2wav_config.dit_checkpoint,
-                bigvgan_ckpt=self.code2wav_config.bigvgan_checkpoint,
-                frequency=getattr(self.code2wav_config, 'frequency', '50hz'),
+            self.token2wav = Qwen2Code2wav(
+                dit_ckpt=self.token2wav_config.dit_checkpoint,
+                bigvgan_ckpt=self.token2wav_config.bigvgan_checkpoint,
+                frequency=getattr(self.token2wav_config, 'frequency', '50hz'),
                 device=device,
             )
             # optional speaker resources
-            conds = getattr(self.code2wav_config, 'conds', None)
-            ref_mels = getattr(self.code2wav_config, 'ref_mels', None)
+            conds = getattr(self.token2wav_config, 'conds', None)
+            ref_mels = getattr(self.token2wav_config, 'ref_mels', None)
             if isinstance(conds, dict) and isinstance(ref_mels, dict):
                 self._code2wav_conds = {k: torch.as_tensor(v, device=device) for k, v in conds.items()}
                 self._code2wav_ref_mels = {k: torch.as_tensor(v, device=device) for k, v in ref_mels.items()}
             # legacy: load from directory if provided
-            model_path = getattr(self.code2wav_config, 'model_path', None)
+            model_path = getattr(self.token2wav_config, 'model_path', None)
             if isinstance(model_path, str) and os.path.isdir(model_path):
                 spk_pt = os.path.join(model_path, 'spk_dict.pt')
                 if os.path.exists(spk_pt):
@@ -311,9 +311,9 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
                         self._code2wav_ref_mels[key] = torch.as_tensor(np.load(f), device=device)
 
     def _codec_to_audio(self, codec_tokens: torch.Tensor, voice_type: str = "default") -> Optional[torch.Tensor]:
-        if self.code2wav_model is None:
+        if self.token2wav is None:
             self._init_code2wav_model()
-        if self.code2wav_model is None:
+        if self.token2wav is None:
             return None
         # Normalize voice type
         voice = (voice_type or 'default').lower()
@@ -326,36 +326,48 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         # Qwen2Code2wav.forward expects (cond, ref_mel, codec)
         # Fallback: create dummy cond/ref_mel if not provided
         if cond is None:
-            cond = torch.zeros((1, 300, 80), device=self.code2wav_model.device, dtype=torch.float32)
+            cond = torch.zeros((1, 300, 80), device=self.token2wav.device, dtype=torch.float32)
         if ref_mel is None:
-            ref_mel = torch.zeros((1, 300, 80), device=self.code2wav_model.device, dtype=torch.float32)
+            ref_mel = torch.zeros((1, 300, 80), device=self.token2wav.device, dtype=torch.float32)
         # Ensure codec is long
-        codec = codec_tokens.to(dtype=torch.long, device=self.code2wav_model.device)
+        codec = codec_tokens.to(dtype=torch.long, device=self.token2wav.device)
         # Run model
         with torch.inference_mode():
-            return self.code2wav_model(cond=cond, ref_mel=ref_mel, codec=codec)
+            return self.token2wav(cond=cond, ref_mel=ref_mel, codec=codec)
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
         """Load weights for all components of the omni model."""
         loaded_weights = set()
-        
+        thinker_weights = []
+        talker_weights = []
+        token2wav_weights = []
+        for k, v in weights:
+            if k.startswith('thinker.'):
+                thinker_weights.append((k, v))
+            elif k.startswith('talker.'):
+                talker_weights.append((k, v))
+            elif k.startswith('token2wav.'):
+                token2wav_weights.append((k, v))
+            else:
+                raise ValueError(f"Unknown weight prefix: {k}")
+
         # Load thinker weights
-        thinker_weights = [(k, v) for k, v in weights if k.startswith('thinker.')]
+        # thinker_weights = [(k, v) for k, v in weights if k.startswith('thinker.')]
         if thinker_weights:
-            thinker_loaded = self.thinker_model.load_weights(thinker_weights)
+            thinker_loaded = self.thinker.load_weights(thinker_weights)
             loaded_weights.update(thinker_loaded)
         
         # Load talker weights
-        talker_weights = [(k, v) for k, v in weights if k.startswith('talker.')]
+        # talker_weights = [(k, v) for k, v in weights if k.startswith('talker.')]
         if talker_weights:
             # Map talker weights to appropriate components
-            talker_loaded = self.talker_model.load_weights(talker_weights)
+            talker_loaded = self.talker.load_weights(talker_weights)
             loaded_weights.update(talker_loaded)
         
         # Load code2wav weights (if any)
-        code2wav_weights = [(k, v) for k, v in weights if k.startswith('code2wav.')]
-        if code2wav_weights and self.code2wav_model is not None:
-            code2wav_loaded = self.code2wav_model.load_weights(code2wav_weights)
+        # code2wav_weights = [(k, v) for k, v in weights if k.startswith('code2wav.')]
+        if token2wav_weights and self.token2wav is not None:
+            code2wav_loaded = self.token2wav.load_weights(token2wav_weights)
             loaded_weights.update(code2wav_loaded)
         
         return loaded_weights
