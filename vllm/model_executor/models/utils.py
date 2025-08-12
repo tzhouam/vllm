@@ -704,6 +704,12 @@ def maybe_prefix(prefix: str, name: str) -> str:
     """
     return name if not prefix else f"{prefix}.{name}"
 
+def add_prefix_to_loaded_weights(weights: set[str], prefix: str) -> set[str]:
+    """
+    Add a prefix to the names of the loaded weights.
+    """
+    return {maybe_prefix(prefix, name) for name in weights}
+
 
 def extract_layer_index(layer_name: str) -> int:
     """

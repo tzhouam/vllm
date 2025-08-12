@@ -49,7 +49,8 @@ from vllm.sequence import IntermediateTensors
 from .interfaces import SupportsMultiModal, SupportsPP
 from .utils import (AutoWeightsLoader, WeightsMapper,
                     init_vllm_registered_model,
-                    maybe_prefix)
+                    maybe_prefix,
+                    add_prefix_to_loaded_weights)
 
 
 class OmniOutput(NamedTuple):
@@ -359,6 +360,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         # thinker_weights = [(k, v) for k, v in weights if k.startswith('thinker.')]
         if thinker_weights:
             thinker_loaded = self.thinker.load_weights(thinker_weights)
+            thinker_loaded = add_prefix_to_loaded_weights(thinker_loaded, 'thinker')
             loaded_weights.update(thinker_loaded)
         
         # Load talker weights
@@ -366,17 +368,19 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         if talker_weights:
             # Map talker weights to appropriate components
             talker_loaded = self.talker.load_weights(talker_weights)
+            talker_loaded = add_prefix_to_loaded_weights(talker_loaded, 'talker')
             loaded_weights.update(talker_loaded)
         
         # Load code2wav weights (if any)
         # code2wav_weights = [(k, v) for k, v in weights if k.startswith('code2wav.')]
-        if token2wav_weights:
-            # ensure token2wav is initialized before weight loading
-            if self.token2wav is None:
-                self._init_code2wav_model()
-            if self.token2wav is not None:
-                code2wav_loaded = self.token2wav.load_weights(
-                    token2wav_weights)
-                loaded_weights.update(code2wav_loaded)
+        # if token2wav_weights:
+        #     # ensure token2wav is initialized before weight loading
+        #     if self.token2wav is None:
+        #         self._init_code2wav_model()
+        #     if self.token2wav is not None:
+        #         code2wav_loaded = self.token2wav.load_weights(
+        #             token2wav_weights)
+        #         code2wav_loaded = add_prefix_to_loaded_weights(code2wav_loaded, 'token2wav')
+        #         loaded_weights.update(code2wav_loaded)
         
         return loaded_weights
