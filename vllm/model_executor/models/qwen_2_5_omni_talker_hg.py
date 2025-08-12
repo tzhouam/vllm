@@ -553,7 +553,7 @@ class Qwen2_5OmniTalkerForConditionalGenerationVLLM(
             vllm_config=vllm_config,
             prefix=_Vllm_maybe_prefix(prefix, "language_model"),
             hf_config=self.config,
-            architectures=["Qwen2_5OmniTalkerModel"],
+            architectures=["Qwen2_5OmniTalkerLanguageModel"],
         )
 
         self.codec_head = ColumnParallelLinear(
