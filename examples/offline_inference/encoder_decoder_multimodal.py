@@ -116,14 +116,6 @@ def run_whisper():
         prompts=prompts,
     )
 
-
-model_example_map = {
-    "florence2": run_florence2,
-    "mllama": run_mllama,
-    "whisper": run_whisper,
-}
-
-
 def run_qwen():
     engine_args = EngineArgs(
         model="Qwen/Qwen2.5-VL-3B-Instruct-AWQ",
@@ -155,6 +147,16 @@ def run_qwen():
         engine_args=engine_args,
         prompts=prompts,
     )
+
+model_example_map = {
+    "florence2": run_florence2,
+    "mllama": run_mllama,
+    "whisper": run_whisper,
+    "qwen": run_qwen
+}
+
+
+
 def parse_args():
     parser = FlexibleArgumentParser(
         description="Demo on using vLLM for offline inference with "
@@ -164,7 +166,7 @@ def parse_args():
         "--model-type",
         "-m",
         type=str,
-        default="mllama",
+        default="qwen",
         choices=model_example_map.keys(),
         help='Huggingface "model_type".',
     )
