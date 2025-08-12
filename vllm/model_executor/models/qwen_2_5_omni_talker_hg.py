@@ -25,41 +25,6 @@ from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
     Qwen2_5OmniTalkerConfig,
 )
 
-
-from functools import cached_property
-from typing import Iterable, Optional, Set, Tuple, Union
-
-
-from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
-    Qwen2_5OmniTalkerConfig as _Vllm_Qwen2_5OmniTalkerConfig,
-)
-
-from vllm.attention import AttentionMetadata
-from vllm.config import VllmConfig
-from vllm.forward_context import ForwardContext, get_forward_context
-from vllm.logger import init_logger
-from vllm.model_executor.layers.linear import ColumnParallelLinear
-from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
-from vllm.model_executor.sampling_metadata import SamplingMetadata
-from vllm.multimodal import MULTIMODAL_REGISTRY
-from vllm.sequence import IntermediateTensors
-
-from vllm.model_executor.models.qwen2_5_omni_thinker import (
-    Qwen2_5OmniConditionalGenerationMixin as _Vllm_Qwen2_5OmniConditionalGenerationMixin,
-    Qwen2_5OmniThinkerDummyInputsBuilder as _Vllm_Qwen2_5OmniThinkerDummyInputsBuilder,
-    Qwen2_5OmniThinkerMultiModalProcessor as _Vllm_Qwen2_5OmniThinkerMultiModalProcessor,
-    Qwen2_5OmniThinkerProcessingInfo as _Vllm_Qwen2_5OmniThinkerProcessingInfo,
-)
-
-from .interfaces import SupportsMultiModal as _Vllm_SupportsMultiModal, SupportsPP as _Vllm_SupportsPP
-from .utils import (
-    AutoWeightsLoader as _Vllm_AutoWeightsLoader,
-    WeightsMapper as _Vllm_WeightsMapper,
-    init_vllm_registered_model as _Vllm_init_vllm_registered_model,
-    maybe_prefix as _Vllm_maybe_prefix,
-)
-
-
 # HF logger for warnings used in the HF talker code below
 logger = _hf_get_logger(__name__)
 
@@ -507,6 +472,40 @@ class Qwen2_5OmniTalkerForConditionalGeneration(Qwen2_5OmniPreTrainedModelForCon
         return model_kwargs
 
 
+from functools import cached_property
+from typing import Iterable, Optional, Set, Tuple, Union
+
+import torch
+import torch.nn as nn
+
+from transformers.models.qwen2_5_omni.configuration_qwen2_5_omni import (
+    Qwen2_5OmniTalkerConfig as _Vllm_Qwen2_5OmniTalkerConfig,
+)
+
+from vllm.attention import AttentionMetadata
+from vllm.config import VllmConfig
+from vllm.forward_context import ForwardContext, get_forward_context
+from vllm.logger import init_logger
+from vllm.model_executor.layers.linear import ColumnParallelLinear
+from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
+from vllm.model_executor.sampling_metadata import SamplingMetadata
+from vllm.multimodal import MULTIMODAL_REGISTRY
+from vllm.sequence import IntermediateTensors
+
+from vllm.model_executor.models.qwen2_5_omni_thinker import (
+    Qwen2_5OmniConditionalGenerationMixin as _Vllm_Qwen2_5OmniConditionalGenerationMixin,
+    Qwen2_5OmniThinkerDummyInputsBuilder as _Vllm_Qwen2_5OmniThinkerDummyInputsBuilder,
+    Qwen2_5OmniThinkerMultiModalProcessor as _Vllm_Qwen2_5OmniThinkerMultiModalProcessor,
+    Qwen2_5OmniThinkerProcessingInfo as _Vllm_Qwen2_5OmniThinkerProcessingInfo,
+)
+
+from .interfaces import SupportsMultiModal as _Vllm_SupportsMultiModal, SupportsPP as _Vllm_SupportsPP
+from .utils import (
+    AutoWeightsLoader as _Vllm_AutoWeightsLoader,
+    WeightsMapper as _Vllm_WeightsMapper,
+    init_vllm_registered_model as _Vllm_init_vllm_registered_model,
+    maybe_prefix as _Vllm_maybe_prefix,
+)
 
 
 @MULTIMODAL_REGISTRY.register_processor(

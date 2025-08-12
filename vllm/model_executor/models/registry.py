@@ -246,8 +246,12 @@ _MULTIMODAL_MODELS = {
     "Qwen2AudioForConditionalGeneration": ("qwen2_audio", "Qwen2AudioForConditionalGeneration"),  # noqa: E501
     "Qwen2_5OmniModel": ("qwen2_5_omni_thinker", "Qwen2_5OmniThinkerForConditionalGeneration"),  # noqa: E501
     "Qwen2_5OmniForConditionalGeneration": ("qwen2_5_omni_thinker", "Qwen2_5OmniThinkerForConditionalGeneration"),  # noqa: E501
-    # Token-to-wav (codec->audio) component for Omni
+    # Token-to-wav (codec->audio) components for Omni
     "Qwen2Code2WavModel": ("qwen2_code2wav_dit", "Qwen2Code2WavModel"),
+    # Register HF Token2Wav as a language model architecture for vLLM wrapper
+    "Qwen2_5OmniToken2WavDiTModel": ("qwen2_5_omni_token2wav", "Qwen2_5OmniToken2WavModel"),
+    # vLLM-style wrapper that delegates to HF Token2Wav
+    "Qwen2_5OmniToken2WavModel": ("qwen2_5_omni_token2wav", "Qwen2_5OmniToken2WavForConditionalGenerationVLLM"),
     "UltravoxModel": ("ultravox", "UltravoxModel"),
     "Step3VLForConditionalGeneration": ("step3_vl", "Step3VLForConditionalGeneration"),  # noqa: E501
     "TarsierForConditionalGeneration": ("tarsier", "TarsierForConditionalGeneration"),  # noqa: E501

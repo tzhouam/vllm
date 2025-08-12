@@ -105,9 +105,16 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             architectures=["Qwen2_5OmniTalkerModel"],
         )
         
-        # code2wav: lazy init at first use via registry
-        self.token2wav = None
+        # Initialize token2wav (code->mel->wav) like thinker/talker
         self.token2wav_config = getattr(config, 'code2wav_config', None)
+        self.token2wav = None
+        if self.token2wav_config is not None:
+            self.token2wav = init_vllm_registered_model(
+                vllm_config=vllm_config,
+                prefix=maybe_prefix(prefix, "token2wav"),
+                hf_config=self.token2wav_config,
+                architectures=["Qwen2_5OmniToken2WavModel"],
+            )
         # voice resources (loaded on demand)
         self._code2wav_conds: Dict[str, torch.Tensor] = {}
         self._code2wav_ref_mels: Dict[str, torch.Tensor] = {}
@@ -279,41 +286,33 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         return codec_id
 
     def _init_code2wav_model(self):
-        """Initialize the code2wav model and speaker resources lazily."""
-        if self.token2wav is None and self.token2wav_config is not None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            # Init from registry
-            self.token2wav = init_vllm_registered_model(
-                vllm_config=self.vllm_config if hasattr(self, 'vllm_config') else None,
-                prefix=maybe_prefix('', 'token2wav'),
-                hf_config=getattr(self, 'token2wav_config', None),
-                architectures=["Qwen2Code2WavModel"],
-            )
-            # If weights provided in merged ckpt, load via load_weights path
-            # weights loading is handled by the framework; here we only ensure instance exists
-            # optional speaker resources
-            conds = getattr(self.token2wav_config, 'conds', None)
-            ref_mels = getattr(self.token2wav_config, 'ref_mels', None)
-            if isinstance(conds, dict) and isinstance(ref_mels, dict):
-                self._code2wav_conds = {k: torch.as_tensor(v, device=device) for k, v in conds.items()}
-                self._code2wav_ref_mels = {k: torch.as_tensor(v, device=device) for k, v in ref_mels.items()}
-            # legacy: load from directory if provided
-            model_path = getattr(self.token2wav_config, 'model_path', None)
-            if isinstance(model_path, str) and os.path.isdir(model_path):
-                spk_pt = os.path.join(model_path, 'spk_dict.pt')
-                if os.path.exists(spk_pt):
-                    data = torch.load(spk_pt, map_location=device)
-                    for key, value in data.items():
-                        self._code2wav_conds[key] = value["cond"].to(device)
-                        self._code2wav_ref_mels[key] = value["ref_mel"].to(device)
-                else:
-                    # legacy npy inputs
-                    for f in sorted(glob.glob(os.path.join(model_path, 'inputs', '*spk_emb.npy'))):
-                        key = os.path.basename(f).split('_')[0].lower()
-                        self._code2wav_conds[key] = torch.as_tensor(np.load(f), device=device)
-                    for f in sorted(glob.glob(os.path.join(model_path, 'inputs', '*ref_mel.npy'))):
-                        key = os.path.basename(f).split('_')[0].lower()
-                        self._code2wav_ref_mels[key] = torch.as_tensor(np.load(f), device=device)
+        """Initialize speaker resources if provided; model is constructed in __init__."""
+        if self.token2wav is None or self.token2wav_config is None:
+            return
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # optional speaker resources
+        conds = getattr(self.token2wav_config, 'conds', None)
+        ref_mels = getattr(self.token2wav_config, 'ref_mels', None)
+        if isinstance(conds, dict) and isinstance(ref_mels, dict):
+            self._code2wav_conds = {k: torch.as_tensor(v, device=device) for k, v in conds.items()}
+            self._code2wav_ref_mels = {k: torch.as_tensor(v, device=device) for k, v in ref_mels.items()}
+        # legacy: load from directory if provided
+        model_path = getattr(self.token2wav_config, 'model_path', None)
+        if isinstance(model_path, str) and os.path.isdir(model_path):
+            spk_pt = os.path.join(model_path, 'spk_dict.pt')
+            if os.path.exists(spk_pt):
+                data = torch.load(spk_pt, map_location=device)
+                for key, value in data.items():
+                    self._code2wav_conds[key] = value["cond"].to(device)
+                    self._code2wav_ref_mels[key] = value["ref_mel"].to(device)
+            else:
+                # legacy npy inputs
+                for f in sorted(glob.glob(os.path.join(model_path, 'inputs', '*spk_emb.npy'))):
+                    key = os.path.basename(f).split('_')[0].lower()
+                    self._code2wav_conds[key] = torch.as_tensor(np.load(f), device=device)
+                for f in sorted(glob.glob(os.path.join(model_path, 'inputs', '*ref_mel.npy'))):
+                    key = os.path.basename(f).split('_')[0].lower()
+                    self._code2wav_ref_mels[key] = torch.as_tensor(np.load(f), device=device)
 
     def _codec_to_audio(self, codec_tokens: torch.Tensor, voice_type: str = "default") -> Optional[torch.Tensor]:
         if self.token2wav is None:
@@ -328,7 +327,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         if voice in self._code2wav_conds and voice in self._code2wav_ref_mels:
             cond = self._code2wav_conds[voice]
             ref_mel = self._code2wav_ref_mels[voice]
-        # Qwen2Code2wav.forward expects (cond, ref_mel, codec)
+        # Token2Wav expects (code, conditioning, reference_mel)
         # Fallback: create dummy cond/ref_mel if not provided
         if cond is None:
             cond = torch.zeros((1, 300, 80), device=self.token2wav.device, dtype=torch.float32)
@@ -338,7 +337,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         codec = codec_tokens.to(dtype=torch.long, device=self.token2wav.device)
         # Run model
         with torch.inference_mode():
-            return self.token2wav(cond=cond, ref_mel=ref_mel, codec=codec)
+            return self.token2wav(code=codec, conditioning=cond, reference_mel=ref_mel)
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
         """Load weights for all components of the omni model."""
@@ -371,16 +370,14 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             talker_loaded = add_prefix_to_loaded_weights(talker_loaded, 'talker')
             loaded_weights.update(talker_loaded)
         
-        # Load code2wav weights (if any)
-        # code2wav_weights = [(k, v) for k, v in weights if k.startswith('code2wav.')]
-        # if token2wav_weights:
-        #     # ensure token2wav is initialized before weight loading
-        #     if self.token2wav is None:
-        #         self._init_code2wav_model()
-        #     if self.token2wav is not None:
-        #         code2wav_loaded = self.token2wav.load_weights(
-        #             token2wav_weights)
-        #         code2wav_loaded = add_prefix_to_loaded_weights(code2wav_loaded, 'token2wav')
-        #         loaded_weights.update(code2wav_loaded)
+        # Load token2wav weights (if any)
+        if token2wav_weights:
+            if self.token2wav is None:
+                # Should be initialized in __init__ if config provided
+                self._init_code2wav_model()
+            if self.token2wav is not None:
+                t2w_loaded = self.token2wav.load_weights(token2wav_weights)
+                t2w_loaded = add_prefix_to_loaded_weights(t2w_loaded, 'token2wav')
+                loaded_weights.update(t2w_loaded)
         
         return loaded_weights
