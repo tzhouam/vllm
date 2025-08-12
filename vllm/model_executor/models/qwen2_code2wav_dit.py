@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Tuple, Union, Optional
 
 import torch
 from torchdiffeq import odeint
@@ -10,10 +10,12 @@ from torchdiffeq import odeint
 from vllm.transformers_utils.qwen2_code2wav_dit.model.dit import DiT
 from vllm.transformers_utils.qwen2_code2wav_dit.model.t2w_cfm import CodecCFM
 from vllm.transformers_utils.qwen2_code2wav_dit.model.utils import (
-    exists, load_checkpoint)
+    exists, maybe_load_checkpoint)
 from vllm.transformers_utils.qwen2_code2wav_dit.modeling_qwen2_code2wav import (
     Qwen2Code2wavBigvgan)
 from vllm.logger import init_logger
+from vllm.config import VllmConfig
+import torch.nn as nn
 
 
 class CudaGraphRunner:
@@ -157,22 +159,21 @@ class BatchCodecCFM(CodecCFM):
     @torch.no_grad()
     def fast_block_sample(
         self,
-        cond: float["b n d"] | float["b nw"],  # noqa: F722
-        codec: int["b nc dc"],
-        ref_mel: float["b n d"],  # noqa: F722
-        y0: float["b n d"],
-        lens: int[b] | None = None,  # noqa: F821
-        steps=32,
-        cfg_strength=1.0,
-        sway_sampling_coef=None,
-        seed: int | None = None,
-        max_duration=4096,
-        vocoder: Callable[[float["b d n"]], float["b nw"]]
-        | None = None,  # noqa: F722
-        no_ref_audio=False,
-        duplicate_test=False,
-        t_inter=0.1,
-        edit_mask=None,
+        cond: torch.Tensor,
+        codec: torch.Tensor,
+        ref_mel: torch.Tensor,
+        y0: torch.Tensor,
+        lens: Optional[torch.Tensor] = None,
+        steps: int = 32,
+        cfg_strength: float = 1.0,
+        sway_sampling_coef: Optional[float] = None,
+        seed: Optional[int] = None,
+        max_duration: int = 4096,
+        vocoder: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        no_ref_audio: bool = False,
+        duplicate_test: bool = False,
+        t_inter: float = 0.1,
+        edit_mask: Optional[torch.Tensor] = None,
     ):
         self.eval()
 
@@ -233,7 +234,7 @@ class BatchCodecCFM(CodecCFM):
 class Qwen2Code2wavDit(torch.nn.Module):
     logger = init_logger(__name__)
 
-    def __init__(self, ckpt, frequency: str = "50hz", device='cpu'):
+    def __init__(self, ckpt: Union[str, dict, None] = None, frequency: str = "50hz", device='cpu'):
         super().__init__()
         self.frequency = frequency
         self.device = device
@@ -262,10 +263,12 @@ class Qwen2Code2wavDit(torch.nn.Module):
             mel_spec_kwargs=self.mel_spec_kwargs,
             odeint_kwargs=self.odeint_kwargs,
         ).to(device)
-        self.cfm_model = load_checkpoint(self.cfm_model,
-                                         ckpt,
-                                         device,
-                                         use_ema=True)
+        # Do not auto-load checkpoint by default; allow external load_weights
+        if ckpt is not None:
+            self.cfm_model = maybe_load_checkpoint(self.cfm_model,
+                                                  ckpt,
+                                                  device,
+                                                  use_ema=True)
         try:
             total_bytes = 0
             for p in self.parameters():
@@ -326,8 +329,8 @@ class Qwen2Code2wav(torch.nn.Module):
     logger = init_logger(__name__)
 
     def __init__(self,
-                 dit_ckpt,
-                 bigvgan_ckpt,
+                 dit_ckpt=None,
+                 bigvgan_ckpt=None,
                  steps: int = 10,
                  bs_mel: int = 24,
                  odeint_method: str = "euler",
@@ -397,6 +400,83 @@ class Qwen2Code2wav(torch.nn.Module):
             self.codec_embed_size = text_embed.text_embed.weight.size(0)
         else:
             self.codec_embed_size = -1
+
+    def load_weights(self, weights: List[Tuple[str, torch.Tensor]]):
+        """
+        Load weights like thinker/talker via prefixed keys:
+          - 'token2wav.code2wav_dit_model.' -> self.code2wav_dit_model
+          - 'token2wav.code2wav_bigvgan_model.generator.' -> self.code2wav_bigvgan_model.vocoder
+        Returns the set of loaded keys.
+        """
+        loaded: set[str] = set()
+
+        # DiT / CFM module
+        dit_state: Dict[str, torch.Tensor] = {}
+        for k, v in weights:
+            if k.startswith('token2wav.code2wav_dit_model.'):
+                new_k = k.replace('token2wav.code2wav_dit_model.', '')
+                # Map to cfm/transformer parameters: accept both direct dit.* and cfm_model.*
+                if new_k.startswith('transformer.'):
+                    # direct DiT weights
+                    dit_state[new_k.replace('transformer.', 'dit.')] = v
+                else:
+                    # assume cfm_model.* path
+                    dit_state[new_k] = v
+                loaded.add(k)
+        if dit_state:
+            # Try strict=False for compatibility
+            self.code2wav_dit_model.load_state_dict(dit_state, strict=False)
+
+        # BigVGAN vocoder
+        bigvgan_state: Dict[str, torch.Tensor] = {}
+        for k, v in weights:
+            if k.startswith('token2wav.code2wav_bigvgan_model.'):
+                new_k = k.replace('token2wav.code2wav_bigvgan_model.', '')
+                # Expect 'generator.*' submodule like saved checkpoints
+                if new_k.startswith('generator.'):
+                    new_k = new_k.replace('generator.', '')
+                bigvgan_state[new_k] = v
+                loaded.add(k)
+        if bigvgan_state:
+            # state dict expects keys of vocoder submodule
+            self.code2wav_bigvgan_model.vocoder.load_state_dict(bigvgan_state,
+                                                                strict=False)
+            # remove weight norm if present
+            self.code2wav_bigvgan_model.vocoder.remove_weight_norm()
+
+        return loaded
+
+
+class Qwen2Code2WavModel(nn.Module):
+    """
+    Registry-friendly wrapper around Qwen2Code2wav.
+
+    - Does NOT auto-load checkpoints.
+    - Exposes load_weights(weights) like thinker/talker.
+    - Constructor matches vLLM registered model interface.
+    """
+
+    def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
+        super().__init__()
+        device = vllm_config.device_config.device
+        hf_cfg = vllm_config.model_config.hf_config
+        # frequency from hf_config if available
+        frequency = getattr(getattr(hf_cfg, 'code2wav_config', hf_cfg),
+                            'frequency', '50hz')
+        self.model = Qwen2Code2wav(
+            dit_ckpt=None,
+            bigvgan_ckpt=None,
+            steps=10,
+            bs_mel=24 if frequency == '50hz' else 32,
+            frequency=frequency,
+            device=device,
+        )
+
+    def forward(self, cond, ref_mel, codec):
+        return self.model(cond, ref_mel, codec)
+
+    def load_weights(self, weights: List[Tuple[str, torch.Tensor]]):
+        return self.model.load_weights(weights)
 
     @contextlib.contextmanager
     def relax_odeint_method(self, relax: bool = False):

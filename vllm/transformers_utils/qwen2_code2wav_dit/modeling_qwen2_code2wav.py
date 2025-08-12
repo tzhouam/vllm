@@ -11,7 +11,7 @@ from torch.nn.utils import remove_weight_norm, weight_norm
 from vllm.transformers_utils.qwen2_code2wav_dit.model.dit import DiT
 from vllm.transformers_utils.qwen2_code2wav_dit.model.t2w_cfm import CodecCFM
 from vllm.transformers_utils.qwen2_code2wav_dit.model.utils import (
-    load_checkpoint)
+    maybe_load_checkpoint)
 
 
 class CausalConv1d(nn.Conv1d):
@@ -796,7 +796,7 @@ class Qwen2Code2wavBigvgan(torch.nn.Module):
 
     def __init__(
         self,
-        ckpt,
+        ckpt=None,
         frequency: str = '50hz',  # 50hz or 25 hz
         device='cpu',
         with_weight_norm: bool = True,
@@ -825,30 +825,31 @@ class Qwen2Code2wavBigvgan(torch.nn.Module):
             use_tanh_at_final=False,
             use_bias_at_final=False,
         )
-        if isinstance(ckpt, str):
-            state_dict = torch.load(ckpt)
-        else:
-            state_dict = ckpt
+        if ckpt is not None:
+            if isinstance(ckpt, str):
+                state_dict = torch.load(ckpt)
+            else:
+                state_dict = ckpt
 
-        if with_weight_norm:
-            loaded_keys = self.vocoder.load_state_dict(state_dict['generator'],
-                                                       strict=False)
-            self.vocoder.remove_weight_norm()
-        else:
-            self.vocoder.remove_weight_norm()
-            loaded_keys = self.vocoder.load_state_dict(state_dict['generator'],
-                                                       strict=False)
-        unexpected_keys = [
-            k for k in loaded_keys.unexpected_keys
-            if 'downsample' not in k and 'upsample' not in k
-        ]
-        assert unexpected_keys == [], f"Unexpected keys (except downsample/upsample): {loaded_keys.unexpected_keys}"
-        missing_keys = [
-            k for k in loaded_keys.missing_keys
-            if 'downsample' not in k and 'upsample' not in k
-        ]
-        assert missing_keys == [], f"Missing keys (except downsample/upsample): {missing_keys}"
-        self.vocoder.eval()
+            if with_weight_norm:
+                loaded_keys = self.vocoder.load_state_dict(state_dict['generator'],
+                                                           strict=False)
+                self.vocoder.remove_weight_norm()
+            else:
+                self.vocoder.remove_weight_norm()
+                loaded_keys = self.vocoder.load_state_dict(state_dict['generator'],
+                                                           strict=False)
+            unexpected_keys = [
+                k for k in loaded_keys.unexpected_keys
+                if 'downsample' not in k and 'upsample' not in k
+            ]
+            assert unexpected_keys == [], f"Unexpected keys (except downsample/upsample): {loaded_keys.unexpected_keys}"
+            missing_keys = [
+                k for k in loaded_keys.missing_keys
+                if 'downsample' not in k and 'upsample' not in k
+            ]
+            assert missing_keys == [], f"Missing keys (except downsample/upsample): {missing_keys}"
+            self.vocoder.eval()
         self.use_f0 = False
         self.mel_bin = 80
         self.device = device
@@ -886,7 +887,7 @@ class Qwen2Code2wavDit(torch.nn.Module):
 
     def __init__(
         self,
-        ckpt,
+        ckpt=None,
         frequency: str = '50hz',  # 50hz or 25 hz
         device='cpu',
     ):
@@ -919,10 +920,11 @@ class Qwen2Code2wavDit(torch.nn.Module):
             mel_spec_kwargs=self.mel_spec_kwargs,
             odeint_kwargs=self.odeint_kwargs,
         ).to(device)
-        self.cfm_model = load_checkpoint(self.cfm_model,
-                                         ckpt,
-                                         device,
-                                         use_ema=True)
+        if ckpt is not None:
+            self.cfm_model = maybe_load_checkpoint(self.cfm_model,
+                                             ckpt,
+                                             device,
+                                             use_ema=True)
 
     def sample(self,
                cond,

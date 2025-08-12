@@ -101,7 +101,11 @@ def padded_mel_batch(ref_mels):
     return padded_ref_mels
 
 
-def load_checkpoint(model, ckpt_path_or_ckpt, device, use_ema=True):
+def maybe_load_checkpoint(model, ckpt_path_or_ckpt, device, use_ema=True):
+    #if ckpt_path_or_ckpt is None, not load checkpoint, return model. The weights should be loaded later in load weight func
+    if ckpt_path_or_ckpt is None:
+        return model
+    
     if not isinstance(ckpt_path_or_ckpt, str):
         checkpoint = ckpt_path_or_ckpt
         ckpt_type = "safetensors"

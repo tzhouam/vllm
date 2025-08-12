@@ -60,7 +60,6 @@ class OmniOutput(NamedTuple):
 
 logger = init_logger(__name__)
 
-
 @MULTIMODAL_REGISTRY.register_processor(
     Qwen2_5OmniThinkerMultiModalProcessor,
     info=Qwen2_5OmniThinkerProcessingInfo,
@@ -75,6 +74,8 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         config: Qwen2_5OmniConfig = vllm_config.model_config.hf_config
         quant_config = vllm_config.quant_config
         multimodal_config = vllm_config.model_config.multimodal_config
+        # keep vllm_config for later submodule init
+        self.vllm_config = vllm_config
         
         # Initialize thinker components
         thinker_config: Qwen2_5OmniThinkerConfig = config.thinker_config
@@ -103,7 +104,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             architectures=["Qwen2_5OmniTalkerModel"],
         )
         
-        # code2wav: lazy init at first use (not a vLLM architecture)
+        # code2wav: lazy init at first use via registry
         self.token2wav = None
         self.token2wav_config = getattr(config, 'code2wav_config', None)
         # voice resources (loaded on demand)
@@ -280,12 +281,15 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         """Initialize the code2wav model and speaker resources lazily."""
         if self.token2wav is None and self.token2wav_config is not None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            self.token2wav = Qwen2Code2wav(
-                dit_ckpt=self.token2wav_config.dit_checkpoint,
-                bigvgan_ckpt=self.token2wav_config.bigvgan_checkpoint,
-                frequency=getattr(self.token2wav_config, 'frequency', '50hz'),
-                device=device,
+            # Init from registry
+            self.token2wav = init_vllm_registered_model(
+                vllm_config=self.vllm_config if hasattr(self, 'vllm_config') else None,
+                prefix=maybe_prefix('', 'token2wav'),
+                hf_config=getattr(self, 'token2wav_config', None),
+                architectures=["Qwen2Code2WavModel"],
             )
+            # If weights provided in merged ckpt, load via load_weights path
+            # weights loading is handled by the framework; here we only ensure instance exists
             # optional speaker resources
             conds = getattr(self.token2wav_config, 'conds', None)
             ref_mels = getattr(self.token2wav_config, 'ref_mels', None)
@@ -366,8 +370,13 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         
         # Load code2wav weights (if any)
         # code2wav_weights = [(k, v) for k, v in weights if k.startswith('code2wav.')]
-        if token2wav_weights and self.token2wav is not None:
-            code2wav_loaded = self.token2wav.load_weights(token2wav_weights)
-            loaded_weights.update(code2wav_loaded)
+        if token2wav_weights:
+            # ensure token2wav is initialized before weight loading
+            if self.token2wav is None:
+                self._init_code2wav_model()
+            if self.token2wav is not None:
+                code2wav_loaded = self.token2wav.load_weights(
+                    token2wav_weights)
+                loaded_weights.update(code2wav_loaded)
         
         return loaded_weights
