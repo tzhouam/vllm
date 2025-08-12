@@ -118,7 +118,7 @@ def run_whisper():
 
 def run_qwen():
     engine_args = EngineArgs(
-        model="Qwen/Qwen2.5-VL-3B-Instruct-AWQ",
+        model="model_ckpt/Qwen2.5-VL-3B-Instruct-AWQ",
         max_model_len=8192,
         max_num_seqs=2,
         limit_mm_per_prompt={"image": 1},
