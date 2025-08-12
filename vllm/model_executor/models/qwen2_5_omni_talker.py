@@ -55,6 +55,17 @@ class Qwen2_5OmniTalkerForConditionalGeneration(nn.Module, SupportsMultiModal,
                                                 SupportsPP,
                                                 Qwen2_5OmniConditionalGenerationMixin):
     logger = init_logger(__name__)
+    # Align to thinker-style static mapper for clarity
+    hf_to_vllm_mapper = WeightsMapper(
+        orig_to_new_prefix={
+            # text LM head/body in talker
+            "talker.codec_head.": "language_model.lm_head.",
+            "talker.model.": "language_model.model.",
+            # projection weights
+            "talker.thinker_to_talker_proj.": "thinker_to_talker_proj.",
+            # fallback root
+            "talker.": "",
+        })
 
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
@@ -84,6 +95,9 @@ class Qwen2_5OmniTalkerForConditionalGeneration(nn.Module, SupportsMultiModal,
         )
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
+
+    def get_language_model(self) -> torch.nn.Module:
+        return self.language_model
 
     @cached_property
     def sampler(self):
@@ -148,22 +162,11 @@ class Qwen2_5OmniTalkerForConditionalGeneration(nn.Module, SupportsMultiModal,
 
     def load_weights(self, weights: Iterable[Tuple[str,
                                                    torch.Tensor]]) -> Set[str]:
-        hf_to_vllm_mapper = WeightsMapper(
-            orig_to_new_prefix={
-                # map HF talker text model -> inner language_model
-                "talker.codec_head.": "language_model.lm_head.",
-                "talker.model.": "language_model.model.",
-                # map HF talker projection -> our projection
-                "talker.thinker_to_talker_proj.": "thinker_to_talker_proj.",
-                # fallback root
-                "talker.": "",
-            })
-
         loader = AutoWeightsLoader(
             self,
             skip_prefixes=['thinker.', 'token2wav.'],
         )
-        loaded = loader.load_weights(weights, mapper=hf_to_vllm_mapper)
+        loaded = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
         # Log load summary
         try:
             total_bytes = 0
