@@ -13,6 +13,9 @@ VLM_IMAGES_DIR = "vision_model_images"
 
 ImageAssetName = Literal["stop_sign", "cherry_blossom"]
 
+img_name2path = {
+    "stop_sign": "vllm_assets/stop_sign.jpg"
+}
 
 @dataclass(frozen=True)
 class ImageAsset:
@@ -20,7 +23,8 @@ class ImageAsset:
 
     @property
     def pil_image(self) -> Image.Image:
-        image_path = get_vllm_public_assets(filename=f"{self.name}.jpg",
+        image_path = img_name2path[self.name] if self.name in img_name2path \
+            else get_vllm_public_assets(filename=f"{self.name}.jpg",
                                             s3_prefix=VLM_IMAGES_DIR)
         return Image.open(image_path)
 

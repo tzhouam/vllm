@@ -124,6 +124,37 @@ model_example_map = {
 }
 
 
+def run_qwen():
+    engine_args = EngineArgs(
+        model="Qwen/Qwen2.5-VL-3B-Instruct-AWQ",
+        max_model_len=8192,
+        max_num_seqs=2,
+        limit_mm_per_prompt={"image": 1},
+        dtype="auto",
+    )
+
+    prompts = [
+        {  # Implicit prompt
+            "prompt": "<|image|><|begin_of_text|>What is the content of this image?",
+            "multi_modal_data": {
+                "image": ImageAsset("stop_sign").pil_image,
+            },
+        },
+        {  # Explicit prompt
+            "encoder_prompt": {
+                "prompt": "<|image|>",
+                "multi_modal_data": {
+                    "image": ImageAsset("stop_sign").pil_image,
+                },
+            },
+            "decoder_prompt": "<|image|><|begin_of_text|>Please describe the image.",
+        },
+    ]
+
+    return ModelRequestData(
+        engine_args=engine_args,
+        prompts=prompts,
+    )
 def parse_args():
     parser = FlexibleArgumentParser(
         description="Demo on using vLLM for offline inference with "
