@@ -19,7 +19,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Inference-only Qwen2.5-Omni model (merged thinker, talker and code2wav dit)."""
+"""Inference-only Qwen2.5-Omni model (merged thinker, talker and token2wav dit)."""
 
 from functools import cached_property
 from typing import Iterable, List, Optional, Set, Tuple, Union, NamedTuple, Dict
@@ -42,7 +42,7 @@ from vllm.model_executor.models.qwen2_5_omni_thinker import (
     Qwen2_5OmniThinkerMultiModalProcessor,
     Qwen2_5OmniThinkerProcessingInfo,
     Qwen2_5OmniThinkerDummyInputsBuilder)
-from vllm.model_executor.models.qwen2_code2wav_dit import Qwen2Code2wav
+# from vllm.model_executor.models.qwen2_code2wav_dit import Qwen2Code2wav
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.sequence import IntermediateTensors
 
@@ -106,7 +106,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         )
         
         # Initialize token2wav (code->mel->wav) like thinker/talker
-        self.token2wav_config = getattr(config, 'code2wav_config', None)
+        self.token2wav_config = getattr(config, 'token2wav_config', None)
         self.token2wav = None
         if self.token2wav_config is not None:
             self.token2wav = init_vllm_registered_model(
@@ -116,8 +116,8 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
                 architectures=["Qwen2_5OmniToken2WavModel"],
             )
         # voice resources (loaded on demand)
-        self._code2wav_conds: Dict[str, torch.Tensor] = {}
-        self._code2wav_ref_mels: Dict[str, torch.Tensor] = {}
+        self._token2wav_conds: Dict[str, torch.Tensor] = {}
+        self._token2wav_ref_mels: Dict[str, torch.Tensor] = {}
         
         # Set up intermediate tensors
         self.make_empty_intermediate_tensors = (
@@ -157,7 +157,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         Forward pass following the sequence:
         1. Get text tokens by thinker (multimodal understanding)
         2. Convert text tokens to code by talker
-        3. Convert code to audio file by code2wav dit
+        3. Convert code to audio file by token2wav dit
         4. Return text with audio
         """
         
@@ -194,11 +194,11 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             inputs_embeds=last_hidden_state,
         )
         
-        # Step 3: Convert code to audio by code2wav dit
+        # Step 3: Convert code to audio by token2wav dit
         # Convert talker output to codec tokens
         codec_tokens = self._convert_to_codec_tokens(talker_output)
         
-        # Step 3: Generate audio using code2wav model
+        # Step 3: Generate audio using token2wav model
         audio_tensor = self._codec_to_audio(codec_tokens, voice_type=voice_type)
         
         # Step 4: Return text with audio
@@ -230,7 +230,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
 
     def generate_speech(self, text_tokens: torch.Tensor, voice_type: str = "default"):
         """
-        Generate speech from text tokens using the talker and code2wav models.
+        Generate speech from text tokens using the talker and token2wav models.
         This method is kept for backward compatibility and direct speech generation.
         
         Args:
@@ -250,7 +250,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         # Convert talker output to codec tokens
         codec_tokens = self._convert_to_codec_tokens(talker_output)
         
-        # Generate audio using code2wav model
+        # Generate audio using token2wav model
         return self._codec_to_audio(codec_tokens, voice_type=voice_type)
 
     def _convert_to_codec_tokens(self, talker_output: torch.Tensor) -> torch.Tensor:
@@ -285,7 +285,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         codec_id = codec_id.view(-1, 1).to(dtype=torch.long)
         return codec_id
 
-    def _init_code2wav_model(self):
+    def _init_token2wav_model(self):
         """Initialize speaker resources if provided; model is constructed in __init__."""
         if self.token2wav is None or self.token2wav_config is None:
             return
@@ -294,8 +294,8 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         conds = getattr(self.token2wav_config, 'conds', None)
         ref_mels = getattr(self.token2wav_config, 'ref_mels', None)
         if isinstance(conds, dict) and isinstance(ref_mels, dict):
-            self._code2wav_conds = {k: torch.as_tensor(v, device=device) for k, v in conds.items()}
-            self._code2wav_ref_mels = {k: torch.as_tensor(v, device=device) for k, v in ref_mels.items()}
+            self._token2wav_conds = {k: torch.as_tensor(v, device=device) for k, v in conds.items()}
+            self._token2wav_ref_mels = {k: torch.as_tensor(v, device=device) for k, v in ref_mels.items()}
         # legacy: load from directory if provided
         model_path = getattr(self.token2wav_config, 'model_path', None)
         if isinstance(model_path, str) and os.path.isdir(model_path):
@@ -303,20 +303,20 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             if os.path.exists(spk_pt):
                 data = torch.load(spk_pt, map_location=device)
                 for key, value in data.items():
-                    self._code2wav_conds[key] = value["cond"].to(device)
-                    self._code2wav_ref_mels[key] = value["ref_mel"].to(device)
+                    self._token2wav_conds[key] = value["cond"].to(device)
+                    self._token2wav_ref_mels[key] = value["ref_mel"].to(device)
             else:
                 # legacy npy inputs
                 for f in sorted(glob.glob(os.path.join(model_path, 'inputs', '*spk_emb.npy'))):
                     key = os.path.basename(f).split('_')[0].lower()
-                    self._code2wav_conds[key] = torch.as_tensor(np.load(f), device=device)
+                    self._token2wav_conds[key] = torch.as_tensor(np.load(f), device=device)
                 for f in sorted(glob.glob(os.path.join(model_path, 'inputs', '*ref_mel.npy'))):
                     key = os.path.basename(f).split('_')[0].lower()
-                    self._code2wav_ref_mels[key] = torch.as_tensor(np.load(f), device=device)
+                    self._token2wav_ref_mels[key] = torch.as_tensor(np.load(f), device=device)
 
     def _codec_to_audio(self, codec_tokens: torch.Tensor, voice_type: str = "default") -> Optional[torch.Tensor]:
         if self.token2wav is None:
-            self._init_code2wav_model()
+            self._init_token2wav_model()
         if self.token2wav is None:
             return None
         # Normalize voice type
@@ -324,9 +324,9 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         # Resolve cond / ref_mel if provided
         cond = None
         ref_mel = None
-        if voice in self._code2wav_conds and voice in self._code2wav_ref_mels:
-            cond = self._code2wav_conds[voice]
-            ref_mel = self._code2wav_ref_mels[voice]
+        if voice in self._token2wav_conds and voice in self._token2wav_ref_mels:
+            cond = self._token2wav_conds[voice]
+            ref_mel = self._token2wav_ref_mels[voice]
         # Token2Wav expects (code, conditioning, reference_mel)
         # Fallback: create dummy cond/ref_mel if not provided
         if cond is None:
@@ -374,7 +374,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         if token2wav_weights:
             if self.token2wav is None:
                 # Should be initialized in __init__ if config provided
-                self._init_code2wav_model()
+                self._init_token2wav_model()
             if self.token2wav is not None:
                 t2w_loaded = self.token2wav.load_weights(token2wav_weights)
                 t2w_loaded = add_prefix_to_loaded_weights(t2w_loaded, 'token2wav')
