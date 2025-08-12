@@ -240,6 +240,7 @@ _MULTIMODAL_MODELS = {
     "Qwen2_5OmniModel": ("qwen2_5_omni_thinker", "Qwen2_5OmniThinkerForConditionalGeneration"),  # noqa: E501
     "Qwen2_5OmniThinkerModel": ("qwen2_5_omni_thinker", "Qwen2_5OmniThinkerForConditionalGeneration"),  # noqa: E501
     # Use the vLLM-style talker wrapper that leverages HF Qwen2_5OmniTalkerModel internally
+    "Qwen2_5OmniTalkerLanguageModel": ("qwen_2_5_omni_talker_hg", "Qwen2_5OmniTalkerModel"),  # noqa: E501
     "Qwen2_5OmniTalkerModel": ("qwen_2_5_omni_talker_hg", "Qwen2_5OmniTalkerForConditionalGenerationVLLM"),  # noqa: E501
     "Qwen2_5OmniMergedModel": ("qwen_2_5_omni", "Qwen2_5OmniForConditionalGeneration"),  # noqa: E501
     "Qwen2AudioForConditionalGeneration": ("qwen2_audio", "Qwen2AudioForConditionalGeneration"),  # noqa: E501
