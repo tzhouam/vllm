@@ -150,8 +150,12 @@ class Qwen2_5OmniTalkerForConditionalGeneration(nn.Module, SupportsMultiModal,
                                                    torch.Tensor]]) -> Set[str]:
         hf_to_vllm_mapper = WeightsMapper(
             orig_to_new_prefix={
+                # map HF talker text model -> inner language_model
                 "talker.codec_head.": "language_model.lm_head.",
                 "talker.model.": "language_model.model.",
+                # map HF talker projection -> our projection
+                "talker.thinker_to_talker_proj.": "thinker_to_talker_proj.",
+                # fallback root
                 "talker.": "",
             })
 
