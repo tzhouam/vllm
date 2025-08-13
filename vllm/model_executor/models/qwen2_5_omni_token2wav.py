@@ -1263,7 +1263,7 @@ class Qwen2_5OmniToken2WavForConditionalGenerationVLLM(nn.Module, SupportsPP):
         self.config = vllm_config.model_config.hf_config
 
         # Initialize underlying HF Token2Wav model via registry
-        self.token2wav_model = _Vllm_init_vllm_registered_model(
+        self.token2wav = _Vllm_init_vllm_registered_model(
             vllm_config=vllm_config,
             prefix=_Vllm_maybe_prefix(prefix, "token2wav_model"),
             hf_config=self.config,
@@ -1276,7 +1276,7 @@ class Qwen2_5OmniToken2WavForConditionalGenerationVLLM(nn.Module, SupportsPP):
         self.make_empty_intermediate_tensors = _empty_intermediate_tensors
 
     def get_language_model(self) -> torch.nn.Module:
-        return self.token2wav_model
+        return self.token2wav
 
     @property
     def sampler(self):
@@ -1295,7 +1295,7 @@ class Qwen2_5OmniToken2WavForConditionalGenerationVLLM(nn.Module, SupportsPP):
         **kwargs,
     ) -> torch.Tensor:
         # Delegate to HF token2wav model
-        return self.token2wav_model(
+        return self.token2wav(
             code=code,
             conditioning=conditioning,
             reference_mel=reference_mel,
@@ -1365,14 +1365,15 @@ class Qwen2_5OmniToken2WavForConditionalGenerationVLLM(nn.Module, SupportsPP):
         weights_to_load = []
         for key, value in weights:
             if key in buffers:
-                weights_to_load.append((key, value))
+                buffers[key]['buffer'] = value
+                weights_to_load.remove((key, value))
         return weights_to_load
 
     def reload_buffers_to_model(self, buffers: dict):
         loaded_buffers = {}
         for name, buf_register in buffers.items():
             buf_val = buf_register['buffer']
-            self.named_buffers()[name] = buf_val
+            buf_val.copy_(self.named_buffers()[name])
             loaded_buffers.add(name)
         return loaded_buffers
 
