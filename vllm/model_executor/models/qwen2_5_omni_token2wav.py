@@ -1366,7 +1366,7 @@ class Qwen2_5OmniToken2WavForConditionalGenerationVLLM(nn.Module, SupportsPP):
         for key, value in weights:
             if key in buffers:
                 buffers[key]['buffer'] = value
-                weights_to_load.remove((key, value))
+                weights_to_load.append((key, value))
         return weights_to_load
 
     def reload_buffers_to_model(self, buffers: dict):

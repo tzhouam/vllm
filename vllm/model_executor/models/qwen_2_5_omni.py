@@ -375,9 +375,9 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             if self.token2wav is None:
                 # Should be initialized in __init__ if config provided
                 self._init_token2wav_model()
-            if self.token2wav is not None:
-                t2w_loaded = self.token2wav.load_weights(token2wav_weights)
-                t2w_loaded = add_prefix_to_loaded_weights(t2w_loaded, 'token2wav')
-                loaded_weights.update(t2w_loaded)
+            
+            t2w_loaded = self.token2wav.load_weights(token2wav_weights)
+            t2w_loaded = add_prefix_to_loaded_weights(t2w_loaded, 'token2wav')
+            loaded_weights.update(t2w_loaded)
         
         return loaded_weights
