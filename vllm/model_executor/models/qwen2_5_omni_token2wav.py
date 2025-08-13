@@ -1374,7 +1374,7 @@ class Qwen2_5OmniToken2WavForConditionalGenerationVLLM(nn.Module, SupportsPP):
         """
         reload stored buffers from weights to model
         """
-        loaded_buffers = {}
+        loaded_buffers = set()
         for name, buf_val in self.named_buffers():
             if name in buffers:
                 buf_val.copy_(buffers[name]['buffer'])
