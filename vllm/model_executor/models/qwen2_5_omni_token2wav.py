@@ -1375,11 +1375,10 @@ class Qwen2_5OmniToken2WavForConditionalGenerationVLLM(nn.Module, SupportsPP):
         reload stored buffers from weights to model
         """
         loaded_buffers = {}
-        for name, buf_register in buffers.items():
-            buf_val = buf_register['buffer']
-            #register the model buffer to the value in prestored buffers
-            self.register_buffer(name, buf_val)
-            loaded_buffers.add(name)
+        for name, buf_val in self.named_buffers():
+            if name in buffers:
+                buf_val.copy_(buffers[name]['buffer'])
+                loaded_buffers.add(name)
         return loaded_buffers
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
