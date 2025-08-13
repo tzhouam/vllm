@@ -1320,7 +1320,7 @@ class Qwen2_5OmniToken2WavForConditionalGenerationVLLM(nn.Module, SupportsPP):
     ) -> Optional[SamplerOutput]:
         return None
 
-    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
+    def load_weights_without_buffers(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
         loader = _Vllm_AutoWeightsLoader(self)
         loaded = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
         # Log load summary
@@ -1335,4 +1335,52 @@ class Qwen2_5OmniToken2WavForConditionalGenerationVLLM(nn.Module, SupportsPP):
                 self.__class__.__name__, True, total_bytes / (1024**2), str(device))
         except Exception:
             pass
+        return loaded
+
+    def find_all_registers(model, prefix=''):
+        """
+        Find all registered buffers in a PyTorch model.
+        
+        Args:
+            model: PyTorch model (nn.Module)
+            prefix: prefix for nested modules (used in recursion)
+        
+        Returns:
+            dict: Dictionary with buffer names as keys and their properties as values
+        """
+        registers = {}
+        
+        # Get all named buffers
+        for name, buf in model.named_buffers():
+            if name in model.state_dict():
+                registers[name] = {
+                    'name': name,
+                    'buffer': buf
+                }
+        return registers
+
+        
+    #remove buffers from the weights and reload them after loading weights
+    def remove_buffers_from_weights(self, weights: Iterable[Tuple[str, torch.Tensor]], buffers: dict):
+        weights_to_load = []
+        for key, value in weights:
+            if key in buffers:
+                weights_to_load.append((key, value))
+        return weights_to_load
+
+    def reload_buffers_to_model(self, buffers: dict):
+        loaded_buffers = {}
+        for name, buf_register in buffers.items():
+            buf_val = buf_register['buffer']
+            self.named_buffers()[name] = buf_val
+            loaded_buffers.add(name)
+        return loaded_buffers
+
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
+        buffers = self.find_all_registers(self)
+        weights_to_load = self.remove_buffers_from_weights(weights, buffers)
+        loaded = self.load_weights_without_buffers(weights_to_load)
+        loaded_buffers = self.reload_buffers_to_model(buffers)
+        #merge loaded and loaded_buffers
+        loaded.update(loaded_buffers)
         return loaded
