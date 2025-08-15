@@ -352,35 +352,44 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
 
     def _convert_to_codec_tokens(self, talker_output: torch.Tensor) -> torch.Tensor:
         """
-        Convert talker model output to codec tokens for audio generation.
-        This is a simplified conversion - in practice, you'd need to implement
-        the specific tokenization logic for your codec.
+        参考 HF：使用 talker 的 codec 头得到 logits，抑制 BOS，再贪心选取当前步的下一个 codec token。
         """
-        # Use talker's LM head to get logits for the last step and greedy-pick
-        if not hasattr(self.talker, 'language_model'):
-            # Fallback: return a zero-length codec
-            return torch.zeros((talker_output.size(0), 0), dtype=torch.long, device=talker_output.device)
-
-        # talker_output: [B, T=1, H] → logits: [B, T=1, V]
-        lm = self.talker.language_model
         with torch.inference_mode():
-            logits = lm.lm_head(talker_output)
-        # mask special codec tokens if available
-        special_ids = []
-        cfg = self.talker_config if hasattr(self, 'talker_config') else None
-        for name in [
-                'tts_codec_start_token_id',
-                'tts_codec_end_token_id',
-                'tts_codec_pad_token_id',
-        ]:
-            if cfg is not None and hasattr(cfg, name):
-                special_ids.append(int(getattr(cfg, name)))
-        if special_ids:
-            logits[..., special_ids] = -1e9
-        # greedy
-        codec_id = torch.argmax(logits[:, -1, :], dim=-1, keepdim=False)
-        codec_id = codec_id.view(-1, 1).to(dtype=torch.long)
-        return codec_id
+            logits = None
+            # 依次尝试多种位置的 codec_head
+            codec_heads = []
+            if hasattr(self.talker, 'codec_head'):
+                codec_heads.append(self.talker.codec_head)
+            if hasattr(self.talker, 'language_model') and hasattr(self.talker.language_model, 'codec_head'):
+                codec_heads.append(self.talker.language_model.codec_head)
+            if hasattr(self.talker, 'language_model') and hasattr(self.talker.language_model, 'model') \
+               and hasattr(self.talker.language_model.model, 'codec_head'):
+                codec_heads.append(self.talker.language_model.model.codec_head)
+
+            for head in codec_heads:
+                try:
+                    logits_tuple = head(talker_output)
+                    if isinstance(logits_tuple, tuple):
+                        logits = logits_tuple[0]
+                    else:
+                        logits = logits_tuple
+                    break
+                except Exception:
+                    continue
+            # 兜底：若不可用，返回空 codec
+            if logits is None:
+                return torch.zeros((talker_output.size(0), 0), dtype=torch.long, device=talker_output.device)
+
+            # 仅抑制 codec_bos，与 HF generate 的 suppress_tokens 行为一致
+            bos_id = None
+            if hasattr(self, 'talker_config') and hasattr(self.talker_config, 'tts_codec_start_token_id'):
+                bos_id = int(getattr(self.talker_config, 'tts_codec_start_token_id'))
+            if bos_id is not None:
+                logits[..., bos_id] = -1e9
+
+            # 取最后一步位置的分布并贪心选取
+            next_id = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
+            return next_id.to(dtype=torch.long)
 
     def _init_token2wav_model(self):
         """Initialize speaker resources if provided; model is constructed in __init__."""
