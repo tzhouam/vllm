@@ -123,6 +123,40 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         self.make_empty_intermediate_tensors = (
             self.thinker.make_empty_intermediate_tensors)
 
+    # -------------------- Device utilities --------------------
+    @staticmethod
+    def _module_device(module: nn.Module) -> torch.device:
+        try:
+            return next(module.parameters()).device
+        except StopIteration:
+            # No parameters; fall back to buffers or cpu
+            for _, buf in module.named_buffers(recurse=True):
+                return buf.device
+            return torch.device("cpu")
+
+    def move_submodules_to_devices(
+        self,
+        *,
+        thinker_device: Optional[Union[str, torch.device]] = None,
+        talker_device: Optional[Union[str, torch.device]] = None,
+        token2wav_device: Optional[Union[str, torch.device]] = None,
+    ) -> None:
+        """Optionally move thinker/talker/token2wav to different devices.
+
+        Example:
+            model.move_submodules_to_devices(
+                thinker_device='cuda:0',
+                talker_device='cuda:1',
+                token2wav_device='cpu',
+            )
+        """
+        if thinker_device is not None and self.thinker is not None:
+            self.thinker.to(thinker_device)
+        if talker_device is not None and self.talker is not None:
+            self.talker.to(talker_device)
+        if token2wav_device is not None and self.token2wav is not None:
+            self.token2wav.to(token2wav_device)
+
     @cached_property
     def sampler(self):
         if hasattr(self.thinker, "sampler"):
@@ -174,7 +208,15 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             inputs_embeds = inputs_embeds.unsqueeze(0)
             added_batch_dim = True
 
-        # 1) Thinker
+        # 1) Thinker (ensure inputs on thinker's device)
+        thinker_dev = self._module_device(self.thinker)
+        if input_ids is not None and input_ids.device != thinker_dev:
+            input_ids = input_ids.to(thinker_dev)
+        if positions is not None and positions.device != thinker_dev:
+            positions = positions.to(thinker_dev)
+        if inputs_embeds is not None and inputs_embeds.device != thinker_dev:
+            inputs_embeds = inputs_embeds.to(thinker_dev)
+        # Run thinker
         thinker_output = self.thinker(
             input_ids=input_ids,
             positions=positions,
@@ -194,17 +236,63 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         # 2) Talker (if codec not provided)
         if codec is None:
-            thinker_reply_part = text_hidden_states[:, -1:, :]
+            # Prepare talker inputs following HF generate() dataflow as much as possible in a step-wise fashion
+            talker_dev = self._module_device(self.talker)
+            thinker_dev = self._module_device(self.thinker)
+
+            # Base embeddings from thinker tokens (B, T, H)
+            embeds_to_talker = self.thinker.get_input_embeddings(input_ids)
+            if embeds_to_talker.device != thinker_dev:
+                embeds_to_talker = embeds_to_talker.to(thinker_dev)
+
+            # Zero-out multimodal placeholder positions similar to HF when corresponding modalities are present
+            with torch.no_grad():
+                if kwargs.get("input_features") is not None:
+                    audio_mask = (input_ids == int(self.thinker_config.audio_token_index)).unsqueeze(-1).expand_as(embeds_to_talker)
+                    embeds_to_talker = embeds_to_talker.masked_fill(audio_mask, 0)
+                if kwargs.get("pixel_values") is not None:
+                    image_mask = (input_ids == int(self.thinker_config.image_token_index)).unsqueeze(-1).expand_as(embeds_to_talker)
+                    embeds_to_talker = embeds_to_talker.masked_fill(image_mask, 0)
+                if kwargs.get("pixel_values_videos") is not None:
+                    video_mask = (input_ids == int(self.thinker_config.video_token_index)).unsqueeze(-1).expand_as(embeds_to_talker)
+                    embeds_to_talker = embeds_to_talker.masked_fill(video_mask, 0)
+
+            # Compose step-wise talker inputs: sum token embedding and hidden state of the latest token
+            last_token_embed = embeds_to_talker[:, -1:, :]
+            last_token_hidden = text_hidden_states[:, -1:, :]
+            step_inputs_embeds = (last_token_embed + last_token_hidden).to(talker_dev)
+
+            # Add a text BOS embedding token before the first reply token as HF does
+            text_bos_id = getattr(self.talker_config, "tts_text_start_token_id", None)
+            if text_bos_id is not None:
+                bos_embed = self.thinker.get_input_embeddings(
+                    torch.tensor([[int(text_bos_id)]], dtype=torch.long, device=thinker_dev)
+                ).to(talker_dev)
+                talker_inputs_embeds = torch.cat([step_inputs_embeds, bos_embed, step_inputs_embeds], dim=1)
+                talker_input_ids = torch.tensor([
+                    [
+                        int(getattr(self.talker_config, "tts_codec_mask_token_id")),
+                        int(getattr(self.talker_config, "tts_codec_pad_token_id")),
+                        int(getattr(self.talker_config, "tts_codec_start_token_id")),
+                    ]
+                ], dtype=torch.long, device=talker_dev).expand(step_inputs_embeds.size(0), -1)
+            else:
+                talker_inputs_embeds = step_inputs_embeds
+                talker_input_ids = torch.tensor([
+                    [int(getattr(self.talker_config, "tts_codec_start_token_id"))]
+                ], dtype=torch.long, device=talker_dev).expand(step_inputs_embeds.size(0), -1)
+
             talker_positions = torch.zeros(
-                (thinker_reply_part.size(0), thinker_reply_part.size(1)),
+                (talker_input_ids.size(0), talker_input_ids.size(1)),
                 dtype=torch.long,
-                device=thinker_reply_part.device,
+                device=talker_dev,
             )
+
             with torch.inference_mode():
                 talker_hidden = self.talker(
-                    input_ids=None,
+                    input_ids=talker_input_ids,
                     positions=talker_positions,
-                    inputs_embeds=thinker_reply_part,
+                    inputs_embeds=talker_inputs_embeds,
                 )
                 codec = self._convert_to_codec_tokens(talker_hidden)
 
@@ -338,12 +426,13 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             ref_mel = self._token2wav_ref_mels[voice]
         # Token2Wav expects (code, conditioning, reference_mel)
         # Fallback: create dummy cond/ref_mel if not provided
+        token2wav_dev = self._module_device(self.token2wav)
         if cond is None:
-            cond = torch.zeros((1, 300, 80), device=self.token2wav.device, dtype=torch.float32)
+            cond = torch.zeros((1, 300, 80), device=token2wav_dev, dtype=torch.float32)
         if ref_mel is None:
-            ref_mel = torch.zeros((1, 300, 80), device=self.token2wav.device, dtype=torch.float32)
+            ref_mel = torch.zeros((1, 300, 80), device=token2wav_dev, dtype=torch.float32)
         # Ensure codec is long
-        codec = codec_tokens.to(dtype=torch.long, device=self.token2wav.device)
+        codec = codec_tokens.to(dtype=torch.long, device=token2wav_dev)
         # Run model
         with torch.inference_mode():
             return self.token2wav(code=codec, conditioning=cond, reference_mel=ref_mel)
