@@ -151,58 +151,61 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         inputs_embeds: Optional[torch.Tensor] = None,
         generate_audio: bool = True,
         voice_type: str = "default",
-        codec: Optional[torch.Tensor] = None,
         **kwargs: object,
     ) -> Union[torch.Tensor, IntermediateTensors, OmniOutput]:
         """
-        Workflow:
-        1) Thinker: multimodal understanding → text hidden states.
-        2) If audio requested and codec not provided, use talker to derive codec.
-        3) If audio requested (or codec provided), use token2wav to synthesize waveform.
-        4) Return text hidden states (and audio when applicable).
+        Forward pass following the sequence:
+        1. Get text tokens by thinker (multimodal understanding)
+        2. Convert text tokens to code by talker
+        3. Convert code to audio file by token2wav dit
+        4. Return text with audio
         """
-
-        # 1) Thinker
+        
+        # Step 1: Process through thinker model (multimodal understanding)
         thinker_output = self.thinker(
             input_ids=input_ids,
             positions=positions,
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
-            **kwargs,
+            **kwargs
         )
-
+        
+        # Extract hidden states from thinker output
         if isinstance(thinker_output, tuple):
-            _, text_hidden_states = thinker_output
+            text_inputs_embeds, hidden_states = thinker_output
         else:
-            text_hidden_states = thinker_output
-
-        # Text-only path
-        if not generate_audio and codec is None:
-            return text_hidden_states
-
-        # 2) Talker (if codec not provided)
-        if codec is None:
-            thinker_reply_part = text_hidden_states[:, -1:, :]
-            talker_positions = torch.zeros(
-                (thinker_reply_part.size(0), thinker_reply_part.size(1)),
-                dtype=torch.long,
-                device=thinker_reply_part.device,
-            )
-            with torch.inference_mode():
-                talker_hidden = self.talker(
-                    input_ids=None,
-                    positions=talker_positions,
-                    inputs_embeds=thinker_reply_part,
-                )
-                codec = self._convert_to_codec_tokens(talker_hidden)
-
-        # 3) Token2Wav
-        audio_tensor = self._codec_to_audio(codec, voice_type=voice_type)
-
+            hidden_states = thinker_output
+        
+        # If audio generation is not requested, return only text hidden states
+        if not generate_audio:
+            return hidden_states
+        
+        # Step 2: Convert text tokens to code by talker
+        # Use the last hidden state (reply step) as input embeddings for talker
+        last_hidden_state = hidden_states[:, -1:, :]
+        talker_positions = torch.zeros(
+            (last_hidden_state.size(0), last_hidden_state.size(1)),
+            dtype=torch.long,
+            device=last_hidden_state.device,
+        )
+        talker_output = self.talker(
+            input_ids=None,
+            positions=talker_positions,
+            inputs_embeds=last_hidden_state,
+        )
+        
+        # Step 3: Convert code to audio by token2wav dit
+        # Convert talker output to codec tokens
+        codec_tokens = self._convert_to_codec_tokens(talker_output)
+        
+        # Step 3: Generate audio using token2wav model
+        audio_tensor = self._codec_to_audio(codec_tokens, voice_type=voice_type)
+        
+        # Step 4: Return text with audio
         return OmniOutput(
-            text_hidden_states=text_hidden_states,
+            text_hidden_states=hidden_states,
             audio_tensor=audio_tensor,
-            intermediate_tensors=intermediate_tensors,
+            intermediate_tensors=intermediate_tensors
         )
 
     def compute_logits(
