@@ -210,7 +210,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         
         #if input_ids is None, set it to an empty tenser, without anything
         if input_ids is None:
-            input_ids = torch.empty(0, dtype=torch.long, device=self.thinker.device)
+            input_ids = torch.empty(0, dtype=torch.long, device=self.thinker.device).unsqueeze(0) #(1, 0)
             
 
         # 1) Thinker (ensure inputs on thinker's device)
