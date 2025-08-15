@@ -615,7 +615,7 @@ class Qwen2_5OmniTalkerForConditionalGenerationVLLM(
         elif inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings(input_ids)
         else:
-            if attn_metadata.prefill_metadata is None:
+            if attn_metadata and attn_metadata.prefill_metadata is None:
                 inputs_embeds += self.get_input_embeddings(input_ids)
 
         input_ids = None
