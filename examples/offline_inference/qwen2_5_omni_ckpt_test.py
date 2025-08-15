@@ -151,10 +151,11 @@ def main():
     # Prepare input ids and positions using tokenizer
     tokenizer = get_tokenizer(
         args.model,
-        tokenizer_mode='auto',
+        tokenizer_mode='slow',  # force slow tokenizer (e.g., QwenTokenizer)
         trust_remote_code=True,
         revision=None,
         download_dir=None,
+        use_fast=False,
     )
     input_ids_list = tokenizer.encode(args.prompt)
     if not input_ids_list:
