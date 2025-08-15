@@ -207,14 +207,14 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         if inputs_embeds is not None and inputs_embeds.ndim == 2:
             inputs_embeds = inputs_embeds.unsqueeze(0)
             added_batch_dim = True
+        thinker_dev = self._module_device(self.thinker)
         
         #if input_ids is None, set it to an empty tenser, without anything
         if input_ids is None:
-            input_ids = torch.empty(0, dtype=torch.long, device=self.thinker.device).unsqueeze(0) #(1, 0)
-            
+            input_ids = torch.empty(0, dtype=torch.long, device=thinker_dev).unsqueeze(0) #(1, 0)
+            added_batch_dim = True
 
         # 1) Thinker (ensure inputs on thinker's device)
-        thinker_dev = self._module_device(self.thinker)
         if input_ids is not None and input_ids.device != thinker_dev:
             input_ids = input_ids.to(thinker_dev)
         if positions is not None and positions.device != thinker_dev:
