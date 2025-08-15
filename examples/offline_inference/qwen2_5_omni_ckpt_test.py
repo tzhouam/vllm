@@ -128,7 +128,6 @@ def main():
     parser.add_argument('--dit-ckpt', default=None, help='Path to DiT checkpoint file (e.g., dit.pt).')
     parser.add_argument('--bigvgan-ckpt', default=None, help='Path to BigVGAN checkpoint file.')
     parser.add_argument('--output-wav', required=True, help='Output wav file path.')
-    parser.add_argument('--batch-size', type=int, default=1, help='Number of identical prompts to batch together.')
     parser.add_argument('--dtype', default='bfloat16', choices=['float16', 'bfloat16', 'float32'])
     parser.add_argument('--max-model-len', type=int, default=32768)
     args = parser.parse_args()
@@ -162,12 +161,8 @@ def main():
         raise ValueError('Tokenized prompt is empty.')
 
     device = engine.engine.device_config.device
-    # Build a batch by repeating the same prompt to ensure inputs_embeds shape is (B, S, D)
-    batch_size = max(1, int(args.batch_size))
-    batch_input_ids = [input_ids_list for _ in range(batch_size)]
-    input_ids = torch.tensor(batch_input_ids, dtype=torch.long, device=device)  # (B, S)
-    seq_len = input_ids.shape[1]
-    positions = torch.arange(seq_len, dtype=torch.long, device=device).unsqueeze(0).expand(batch_size, -1)
+    input_ids = torch.tensor(input_ids_list, dtype=torch.long, device=device).unsqueeze(0)
+    positions = torch.arange(input_ids.shape[1], dtype=torch.long, device=device).unsqueeze(0)
 
     # Directly call model.forward to get both text and audio
     model = get_model_instance(engine)
