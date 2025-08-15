@@ -162,6 +162,18 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         4) Return text hidden states (and audio when applicable).
         """
 
+        # Normalize to batched inputs if caller provides 1D/2D unbatched tensors
+        added_batch_dim = False
+        if input_ids is not None and input_ids.ndim == 1:
+            input_ids = input_ids.unsqueeze(0)
+            added_batch_dim = True
+        if positions is not None and positions.ndim == 1:
+            positions = positions.unsqueeze(0)
+            added_batch_dim = True
+        if inputs_embeds is not None and inputs_embeds.ndim == 2:
+            inputs_embeds = inputs_embeds.unsqueeze(0)
+            added_batch_dim = True
+
         # 1) Thinker
         thinker_output = self.thinker(
             input_ids=input_ids,
@@ -178,7 +190,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         # Text-only path
         if not generate_audio and codec is None:
-            return text_hidden_states
+            return text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states
 
         # 2) Talker (if codec not provided)
         if codec is None:
@@ -200,7 +212,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         audio_tensor = self._codec_to_audio(codec, voice_type=voice_type)
 
         return OmniOutput(
-            text_hidden_states=text_hidden_states,
+            text_hidden_states=text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states,
             audio_tensor=audio_tensor,
             intermediate_tensors=intermediate_tensors,
         )
