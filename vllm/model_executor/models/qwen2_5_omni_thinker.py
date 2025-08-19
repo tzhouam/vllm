@@ -874,7 +874,7 @@ class Qwen2_5OmniThinkerForConditionalGeneration(
                                                   positions,
                                                   intermediate_tensors,
                                                   inputs_embeds=inputs_embeds)
-        return hidden_states
+        return hidden_states.unsqueeze(0) #(1, S, D)
 
     def compute_logits(
         self,
