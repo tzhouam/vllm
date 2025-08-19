@@ -144,7 +144,7 @@ def main():
         max_model_len=args.max_model_len,
         dtype=args.dtype,
         gpu_memory_utilization=0.9,
-        enforce_eager=False,
+        enforce_eager=True,
     )
     engine = AsyncLLMEngine.from_engine_args(engine_args)
 
