@@ -442,9 +442,9 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         # Fallback: create dummy cond/ref_mel if not provided
         token2wav_dev = self._module_device(self.token2wav)
         if cond is None:
-            cond = torch.zeros((300, 80), device=token2wav_dev, dtype=torch.float32)
+            cond = torch.zeros((1, self.token2wav_config.dit_config.enc_emb_dim), device=token2wav_dev, dtype=torch.float32)
         if ref_mel is None:
-            ref_mel = torch.zeros((1, 300, 80), device=token2wav_dev, dtype=torch.float32)
+            ref_mel = torch.zeros((1, 300, self.token2wav_config.dit_config.mel_dim), device=token2wav_dev, dtype=torch.float32)
         # Ensure codec is long
         codec = codec_tokens.to(dtype=torch.long, device=token2wav_dev)
         # Run model
