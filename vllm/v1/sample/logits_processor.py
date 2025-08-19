@@ -11,7 +11,8 @@ from typing import Optional, Union
 import torch
 from torch._prims_common import DeviceLikeType
 
-from vllm import PoolingParams, SamplingParams
+from vllm.pooling_params import PoolingParams
+from vllm.sampling_params import SamplingParams
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
