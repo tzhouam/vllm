@@ -1238,7 +1238,7 @@ class Qwen2_5OmniToken2WavModel(Qwen2_5OmniPreTrainedModel):
             num_steps=num_steps,
             guidance_scale=guidance_scale,
             sway_coefficient=sway_coefficient,
-        )
+        ).to(self.code2wav_bigvgan_model.dtype)
 
         waveform = self.code2wav_bigvgan_model(mel_spectrogram)
 
