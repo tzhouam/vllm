@@ -47,6 +47,7 @@ import json
 import os
 
 import soundfile as sf
+import asyncio
 try:
     from huggingface_hub import snapshot_download
     _HF_AVAILABLE = True
@@ -148,47 +149,22 @@ def main():
     )
     engine = AsyncLLMEngine.from_engine_args(engine_args)
 
-    # Prepare input ids and positions using tokenizer
-    tokenizer = get_tokenizer(
-        args.model,
-        tokenizer_mode='slow',  # force slow tokenizer (e.g., QwenTokenizer)
-        trust_remote_code=True,
-        revision=None,
-        download_dir=None,
-        use_fast=False,
-    )
-    input_ids_list = tokenizer.encode(args.prompt)
-    if not input_ids_list:
-        raise ValueError('Tokenized prompt is empty.')
-
-    device = engine.engine.device_config.device
-    input_ids = torch.tensor(input_ids_list, dtype=torch.long, device=device).unsqueeze(0)
-    positions = torch.arange(input_ids.shape[1], dtype=torch.long, device=device).unsqueeze(0)
-
-    # Directly call model.forward to get both text and audio
-    model = get_model_instance(engine)
-    with torch.inference_mode():
-        output = model.forward(
-            input_ids=input_ids,
-            positions=positions,
-            generate_audio=True,
-            voice_type=args.voice_type,
-        )
-
-    # Save audio
-    audio = output.audio_tensor
-    if audio is None or audio.numel() == 0:
-        raise RuntimeError('No audio generated. Check code2wav checkpoints and voice type.')
-
-    audio_cpu = audio.detach().cpu().numpy()
-    # choose 24kHz as default; adjust if your BigVGAN is trained at other rates
-    sf.write(args.output_wav, audio_cpu.squeeze(0), 24000)
-
-    # Optional: also run text generation to see text output
+    # 使用 vLLM 引擎请求接口，不再直调 model.forward
     sampling = SamplingParams(temperature=0.7, top_p=0.9, max_tokens=128)
-    request_outputs = engine.generate(args.prompt, sampling)
-    for ro in request_outputs:
-        print('Generated text:', ro.outputs[0].text)
+
+    async def run_generation():
+        final_output = None
+        request_id = "req-omni-1"
+        # 仅文本请求示例；如需多模态，请构造 {"prompt": prompt, "multi_modal_data": mm_data}
+        prompt = args.prompt
+        async for ro in engine.generate(prompt, sampling, request_id):
+            final_output = ro
+        return final_output
+
+    final = asyncio.run(run_generation())
+    if final is None or not final.outputs:
+        raise RuntimeError('No text generated from engine.')
+    print('Generated text:', final.outputs[0].text)
 
     # Cleanup
     engine.engine.llm_engine.shutdown()
