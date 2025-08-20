@@ -118,6 +118,9 @@ class EngineCoreOutput(
     # The number of tokens with prefix cache hits.
     num_cached_tokens: int = 0
 
+    #multimodal outputs
+    multimodal_outputs: Optional[dict[str, torch.Tensor]] = None
+
     @property
     def finished(self) -> bool:
         return self.finish_reason is not None
