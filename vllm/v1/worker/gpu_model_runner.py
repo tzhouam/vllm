@@ -2147,7 +2147,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     
     @torch.inference_mode()
     def extract_multimodal_outputs(self, hidden_states: torch.Tensor) -> dict:
-        if hasattr(self.model, "multimodal_outputs"):
+        if hasattr(self.model, "have_multimodal_outputs") and self.model.have_multimodal_outputs:
             text_hidden_states = hidden_states.text_hidden_states
             multimodal_outputs = hidden_states.multimodal_outputs
         else:
