@@ -56,7 +56,7 @@ from .utils import (AutoWeightsLoader, WeightsMapper,
 class OmniOutput(NamedTuple):
     """Output from the merged Omni model containing both text and audio."""
     text_hidden_states: torch.Tensor
-    audio_tensor: Optional[torch.Tensor] = None
+    multimodal_outputs: dict = {}
     intermediate_tensors: Optional[IntermediateTensors] = None
 
 logger = init_logger(__name__)
@@ -306,8 +306,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
 
         return OmniOutput(
             text_hidden_states=text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states,
-            audio_tensor=audio_tensor,
-            intermediate_tensors=intermediate_tensors,
+            multimodal_outputs={"audio": audio_tensor}
         )
 
     def compute_logits(

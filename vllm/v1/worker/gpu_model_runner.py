@@ -2144,6 +2144,16 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             batched_dummy_mm_inputs,
             device=self.device,
         )
+    
+    @torch.inference_mode()
+    def extract_multimodal_outputs(self, hidden_states: torch.Tensor) -> dict:
+        if hasattr(self.model, "multimodal_outputs"):
+            text_hidden_states = hidden_states.text_hidden_states
+            multimodal_outputs = hidden_states.multimodal_outputs
+        else:
+            text_hidden_states = hidden_states
+            multimodal_outputs = {}
+        return text_hidden_states, multimodal_outputs
 
     @torch.inference_mode()
     def _dummy_run(
@@ -2257,6 +2267,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             else:
                 hidden_states = outputs
 
+            logger.warning(f"Multimodal outputs are not returned in the dummy run, need to double check the implementation!!!!!!!!!!!!")
+            text_hidden_states, multimodal_outputs = self.extract_multimodal_outputs(hidden_states)
+
+
             if self.speculative_config and self.speculative_config.use_eagle():
                 assert isinstance(self.drafter, EagleProposer)
                 self.drafter.dummy_run(num_tokens)
@@ -2272,7 +2286,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.eplb_step(is_dummy=True, is_profile=is_profile)
 
         logit_indices = np.cumsum(num_scheduled_tokens) - 1
-        return hidden_states, hidden_states[logit_indices]
+        return text_hidden_states, text_hidden_states[logit_indices]
 
     @torch.inference_mode()
     def _dummy_sampler_run(
