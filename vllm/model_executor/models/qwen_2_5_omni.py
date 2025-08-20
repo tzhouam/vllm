@@ -168,11 +168,10 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         self,
         input_ids: torch.Tensor,
         multimodal_embeddings=None,
-        seq_data=None,
     ) -> torch.Tensor:
         # Use thinker model for input embeddings (handles multimodal inputs)
         return self.thinker.get_input_embeddings(
-            input_ids, multimodal_embeddings, seq_data)
+            input_ids, multimodal_embeddings)
 
     def get_multimodal_embeddings(self, **kwargs):
         # Delegate to thinker model for multimodal processing
