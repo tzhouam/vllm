@@ -1554,6 +1554,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             hidden_states = model_output
             aux_hidden_states = None
 
+        text_hidden_states, multimodal_outputs = self.extract_multimodal_outputs(hidden_states)
+
         # Broadcast PP output for external_launcher (torchrun)
         # to make sure we are synced across pp ranks
         # TODO: Support overlapping mirco-batches
@@ -1563,19 +1565,19 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             == "external_launcher" and len(get_pp_group().ranks) > 0
         if not get_pp_group().is_last_rank:
             # For mid-pipeline stages, return the hidden states.
-            assert isinstance(hidden_states, IntermediateTensors)
+            assert isinstance(text_hidden_states, IntermediateTensors)
             if not broadcast_pp_output:
-                hidden_states.kv_connector_output = kv_connector_output
-                return hidden_states
-            get_pp_group().send_tensor_dict(hidden_states.tensors,
+                text_hidden_states.kv_connector_output = kv_connector_output
+                return text_hidden_states
+            get_pp_group().send_tensor_dict(text_hidden_states.tensors,
                                             all_gather_group=get_tp_group())
             logits = None
         else:
             if self.input_batch.pooling_params:
-                return self._pool(hidden_states, num_scheduled_tokens,
+                return self._pool(text_hidden_states, num_scheduled_tokens,
                                   num_scheduled_tokens_np, kv_connector_output)
 
-            sample_hidden_states = hidden_states[logits_indices]
+            sample_hidden_states = text_hidden_states[logits_indices]
             logits = self.model.compute_logits(sample_hidden_states, None)
         if broadcast_pp_output:
             model_output_broadcast_data = {
@@ -1653,7 +1655,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # Compute prompt logprobs if needed.
         prompt_logprobs_dict = self._get_prompt_logprobs_dict(
-            hidden_states[:num_scheduled_tokens],
+            text_hidden_states[:num_scheduled_tokens],
             scheduler_output,
         )
 
@@ -1706,7 +1708,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 scheduler_output,
                 valid_sampled_token_ids,
                 sampling_metadata,
-                hidden_states,
+                text_hidden_states,
                 sample_hidden_states,
                 aux_hidden_states,
                 spec_decode_metadata,
@@ -1725,6 +1727,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             pooler_output=[],
             kv_connector_output=kv_connector_output,
             num_nans_in_logits=num_nans_in_logits,
+            multimodal_outputs=multimodal_outputs,
         )
 
     def propose_draft_token_ids(
@@ -2150,6 +2153,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if hasattr(self.model, "have_multimodal_outputs") and self.model.have_multimodal_outputs:
             text_hidden_states = hidden_states.text_hidden_states
             multimodal_outputs = hidden_states.multimodal_outputs
+
         else:
             text_hidden_states = hidden_states
             multimodal_outputs = {}
