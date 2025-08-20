@@ -127,20 +127,20 @@ def run_qwen():
 
     prompts = [
         {  # Implicit prompt
-            "prompt": "<|image|><|begin_of_text|>What is the content of this image?",
+            "prompt": "<|image_pad|><|begin_of_text|>What is the content of this image?",
             "multi_modal_data": {
                 "image": ImageAsset("stop_sign").pil_image,
             },
         },
-        {  # Explicit prompt
-            "encoder_prompt": {
-                "prompt": "<|image|>",
-                "multi_modal_data": {
-                    "image": ImageAsset("stop_sign").pil_image,
-                },
-            },
-            "decoder_prompt": "<|image|><|begin_of_text|>Please describe the image.",
-        },
+        # {  # Explicit prompt
+        #     "encoder_prompt": {
+        #         "prompt": "<|image|>",
+        #         "multi_modal_data": {
+        #             "image": ImageAsset("stop_sign").pil_image,
+        #         },
+        #     },
+        #     "decoder_prompt": "<|image|><|begin_of_text|>Please describe the image.",
+        # },
     ]
 
     return ModelRequestData(
