@@ -750,11 +750,11 @@ class UpSample1d(nn.Module):
 
     def forward(self, hidden_states):
         channels = hidden_states.shape[1]
-
+        hidden_states_dtype = hidden_states.dtype
         hidden_states = F.pad(hidden_states, (self.pad, self.pad), mode="replicate").to(self.filter.dtype)
         hidden_states = self.ratio * F.conv_transpose1d(
             hidden_states, self.filter.expand(channels, -1, -1), stride=self.stride, groups=channels
-        ).to(self.dtype)
+        ).to(hidden_states_dtype)
         hidden_states = hidden_states[..., self.pad_left : -self.pad_right]
 
         return hidden_states
@@ -780,8 +780,9 @@ class DownSample1d(nn.Module):
 
     def forward(self, hidden_states):
         channels = hidden_states.shape[1]
+        hidden_states_dtype = hidden_states.dtype
         hidden_states = F.pad(hidden_states, (self.pad_left, self.pad_right), mode="replicate").to(self.filter.dtype)
-        out = F.conv1d(hidden_states, self.filter.expand(channels, -1, -1), stride=self.stride, groups=channels).to(self.dtype)
+        out = F.conv1d(hidden_states, self.filter.expand(channels, -1, -1), stride=self.stride, groups=channels).to(hidden_states_dtype)
         return out
 
 
