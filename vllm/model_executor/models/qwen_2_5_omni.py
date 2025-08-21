@@ -242,57 +242,64 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         # 2) Talker (if codec not provided)
         if codec is None:
             # Prepare talker inputs following HF generate() dataflow as much as possible in a step-wise fashion
-            talker_dev = self._module_device(self.talker)
-            thinker_dev = self._module_device(self.thinker)
+            # talker_dev = self._module_device(self.talker)
+            # thinker_dev = self._module_device(self.thinker)
 
-            # Base embeddings from thinker tokens (B, T, H)
-            embeds_to_talker = self.thinker.get_input_embeddings(input_ids)
-            if embeds_to_talker.device != thinker_dev:
-                embeds_to_talker = embeds_to_talker.to(thinker_dev)
+            # # Base embeddings from thinker tokens (B, T, H)
+            # embeds_to_talker = self.thinker.get_input_embeddings(input_ids)
+            # if embeds_to_talker.device != thinker_dev:
+            #     embeds_to_talker = embeds_to_talker.to(thinker_dev)
 
-            # Zero-out multimodal placeholder positions similar to HF when corresponding modalities are present
-            with torch.no_grad():
-                if kwargs.get("input_features") is not None:
-                    audio_mask = (input_ids == int(self.thinker_config.audio_token_index)).unsqueeze(-1).expand_as(embeds_to_talker)
-                    embeds_to_talker = embeds_to_talker.masked_fill(audio_mask, 0)
-                if kwargs.get("pixel_values") is not None:
-                    image_mask = (input_ids == int(self.thinker_config.image_token_index)).unsqueeze(-1).expand_as(embeds_to_talker)
-                    embeds_to_talker = embeds_to_talker.masked_fill(image_mask, 0)
-                if kwargs.get("pixel_values_videos") is not None:
-                    video_mask = (input_ids == int(self.thinker_config.video_token_index)).unsqueeze(-1).expand_as(embeds_to_talker)
-                    embeds_to_talker = embeds_to_talker.masked_fill(video_mask, 0)
+            # # Zero-out multimodal placeholder positions similar to HF when corresponding modalities are present
+            # with torch.no_grad():
+            #     if kwargs.get("input_features") is not None:
+            #         audio_mask = (input_ids == int(self.thinker_config.audio_token_index)).unsqueeze(-1).expand_as(embeds_to_talker)
+            #         embeds_to_talker = embeds_to_talker.masked_fill(audio_mask, 0)
+            #     if kwargs.get("pixel_values") is not None:
+            #         image_mask = (input_ids == int(self.thinker_config.image_token_index)).unsqueeze(-1).expand_as(embeds_to_talker)
+            #         embeds_to_talker = embeds_to_talker.masked_fill(image_mask, 0)
+            #     if kwargs.get("pixel_values_videos") is not None:
+            #         video_mask = (input_ids == int(self.thinker_config.video_token_index)).unsqueeze(-1).expand_as(embeds_to_talker)
+            #         embeds_to_talker = embeds_to_talker.masked_fill(video_mask, 0)
 
-            # Compose step-wise talker inputs: sum token embedding and hidden state of the latest token
-            last_token_embed = embeds_to_talker[:, -1:, :]
-            last_token_hidden = text_hidden_states[:, -1:, :]
-            step_inputs_embeds = (last_token_embed + last_token_hidden).to(talker_dev)
+            # # Compose step-wise talker inputs: sum token embedding and hidden state of the latest token
+            # last_token_embed = embeds_to_talker[:, -1:, :]
+            # last_token_hidden = text_hidden_states[:, -1:, :]
+            # step_inputs_embeds = (last_token_embed + last_token_hidden).to(talker_dev)
 
-            # Add a text BOS embedding token before the first reply token as HF does
-            text_bos_id = getattr(self.talker_config, "tts_text_start_token_id", None)
-            if text_bos_id is not None:
-                bos_embed = self.thinker.get_input_embeddings(
-                    torch.tensor([[int(text_bos_id)]], dtype=torch.long, device=thinker_dev)
-                ).to(talker_dev)
-                talker_inputs_embeds = torch.cat([step_inputs_embeds, bos_embed, step_inputs_embeds], dim=1)
-                talker_input_ids = torch.tensor([
-                    [
-                        int(getattr(self.talker_config, "tts_codec_mask_token_id")),
-                        int(getattr(self.talker_config, "tts_codec_pad_token_id")),
-                        int(getattr(self.talker_config, "tts_codec_start_token_id")),
-                    ]
-                ], dtype=torch.long, device=talker_dev).expand(step_inputs_embeds.size(0), -1)
-            else:
-                talker_inputs_embeds = step_inputs_embeds
-                talker_input_ids = torch.tensor([
-                    [int(getattr(self.talker_config, "tts_codec_start_token_id"))]
-                ], dtype=torch.long, device=talker_dev).expand(step_inputs_embeds.size(0), -1)
+            # # Add a text BOS embedding token before the first reply token as HF does
+            # text_bos_id = getattr(self.talker_config, "tts_text_start_token_id", None)
+            # if text_bos_id is not None:
+            #     bos_embed = self.thinker.get_input_embeddings(
+            #         torch.tensor([[int(text_bos_id)]], dtype=torch.long, device=thinker_dev)
+            #     ).to(talker_dev)
+            #     talker_inputs_embeds = torch.cat([step_inputs_embeds, bos_embed, step_inputs_embeds], dim=1)
+            #     talker_input_ids = torch.tensor([
+            #         [
+            #             int(getattr(self.talker_config, "tts_codec_mask_token_id")),
+            #             int(getattr(self.talker_config, "tts_codec_pad_token_id")),
+            #             int(getattr(self.talker_config, "tts_codec_start_token_id")),
+            #         ]
+            #     ], dtype=torch.long, device=talker_dev).expand(step_inputs_embeds.size(0), -1)
+            # else:
+            #     talker_inputs_embeds = step_inputs_embeds
+            #     talker_input_ids = torch.tensor([
+            #         [int(getattr(self.talker_config, "tts_codec_start_token_id"))]
+            #     ], dtype=torch.long, device=talker_dev).expand(step_inputs_embeds.size(0), -1)
 
-            talker_positions = torch.zeros(
-                (talker_input_ids.size(0), talker_input_ids.size(1)),
-                dtype=torch.long,
-                device=talker_dev,
+            # talker_positions = torch.zeros(
+            #     (talker_input_ids.size(0), talker_input_ids.size(1)),
+            #     dtype=torch.long,
+            #     device=talker_dev,
+            # )
+            talker_input_ids = None
+            talker_positions = None
+            talker_inputs_embeds, _ = self.thinker_to_talker(
+                input_ids=input_ids,
+                thinker_result=text_hidden_states,
+                thinker_kwargs=kwargs,
+                attention_mask=None,
             )
-
             with torch.inference_mode():
                 talker_hidden = self.talker(
                     input_ids=talker_input_ids,
