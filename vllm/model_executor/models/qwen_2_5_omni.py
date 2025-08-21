@@ -294,12 +294,12 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             # )
             talker_input_ids = None
             talker_positions = None
-            talker_inputs_embeds, _ = self._thinker_to_talker(
+            talker_inputs_embeds = self._thinker_to_talker(
                 input_ids=input_ids,
                 thinker_result=text_hidden_states,
                 thinker_kwargs=kwargs,
                 attention_mask=None,
-            )
+            )["talker_inputs_embeds"]
             with torch.inference_mode():
                 talker_hidden = self.talker(
                     input_ids=talker_input_ids,
