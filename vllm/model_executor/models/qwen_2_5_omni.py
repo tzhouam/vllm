@@ -403,14 +403,40 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         # - HF generate(): thinker_result has attributes .hidden_states/.sequences
         # - vLLM thinker forward: thinker_result is the text hidden states tensor of shape [B, T, H]
         if isinstance(thinker_result, torch.Tensor):
-            # vLLM path: full sequence. Compose talker embeddings by adding token embeds and text hidden states
+            # vLLM path: full sequence. Compose talker embeddings by summing token embeds and thinker hidden states
             text_hidden_states = thinker_result.to(device)
             if text_hidden_states.dim() == 2:
                 text_hidden_states = text_hidden_states.unsqueeze(0)
-            talker_inputs_embeds = torch.cat([base_token_embeds, text_hidden_states], dim=1)
+            fused_embeds = base_token_embeds + text_hidden_states
+
+            # Resolve special tokens analogous to engine's logic
+            def _get_talker_token(attr_name: str, config_name: str) -> Optional[int]:
+                value = getattr(self.talker, attr_name, None)
+                if value is None and hasattr(self, "talker_config"):
+                    value = getattr(self.talker_config, config_name, None)
+                return int(value) if value is not None else None
+
+            text_bos_token = _get_talker_token("text_bos_token", "tts_text_start_token_id")
+            if text_bos_token is not None:
+                bos_embed = self.thinker.get_input_embeddings(
+                    torch.tensor([[text_bos_token]], dtype=torch.long, device=device)
+                )
+            else:
+                bos_embed = torch.zeros_like(fused_embeds[:, :1, :])
+
+            # Approximate first reply step with last fused token
+            first_reply_like = fused_embeds[:, -1:, :]
+            talker_inputs_embeds = torch.cat([fused_embeds, bos_embed, first_reply_like], dim=1)
+
+            talker_attention_mask = None
+            if attention_mask is not None:
+                talker_attention_mask = torch.cat(
+                    [attention_mask, attention_mask.new_ones((1, 2))], dim=1
+                ).to(device)
 
             return {
                 "talker_inputs_embeds": talker_inputs_embeds,
+                "talker_attention_mask": talker_attention_mask,
             }
 
         # HF path below mirrors the original generate() conversion
