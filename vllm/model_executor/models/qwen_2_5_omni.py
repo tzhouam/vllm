@@ -294,7 +294,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             # )
             talker_input_ids = None
             talker_positions = None
-            talker_inputs_embeds, _ = self.thinker_to_talker(
+            talker_inputs_embeds, _ = self._thinker_to_talker(
                 input_ids=input_ids,
                 thinker_result=text_hidden_states,
                 thinker_kwargs=kwargs,
