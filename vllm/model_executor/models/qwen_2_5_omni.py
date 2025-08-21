@@ -407,7 +407,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             text_hidden_states = thinker_result.to(device)
             if text_hidden_states.dim() == 2:
                 text_hidden_states = text_hidden_states.unsqueeze(0)
-            talker_inputs_embeds = base_token_embeds + text_hidden_states
+            talker_inputs_embeds = torch.cat([base_token_embeds, text_hidden_states], dim=1)
 
             return {
                 "talker_inputs_embeds": talker_inputs_embeds,
