@@ -600,13 +600,13 @@ class Qwen2_5OmniTalkerForConditionalGenerationVLLM(
 
     def forward(
         self,
-        input_ids: torch.Tensor,
-        positions: torch.Tensor,
+        input_ids: torch.Tensor = None,
+        positions: torch.Tensor = None,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs: object,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-
+        assert input_ids is not None or inputs_embeds is not None, "input_ids or inputs_embeds must be provided"
         forward_context: ForwardContext = get_forward_context()
         attn_metadata: AttentionMetadata = forward_context.attn_metadata
 
