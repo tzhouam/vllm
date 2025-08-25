@@ -56,7 +56,7 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
 from torch.nn import Linear
-from torch.nn.attention import MultiheadAttention
+from torch.nn import MultiheadAttention
 
 class Qwen2MLP(nn.Module):
 
