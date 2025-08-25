@@ -380,7 +380,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             torch.tensor(
                 [talker_hf_config.tts_text_start_token_id],
                 dtype=torch.long,
-                device=self.device,
+                device="cuda:0",
             ))
         self.embed_text_spk_tokens = {
             key:
@@ -388,7 +388,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
                 torch.tensor(
                     [value],
                     dtype=torch.long,
-                    device=self.device,
+                    device="cuda:0",
                 ))
             for key, value in self.tts_text_spk_token_ids.items()
         }
@@ -396,31 +396,31 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             torch.tensor(
                 [talker_hf_config.tts_text_end_token_id],
                 dtype=torch.long,
-                device=self.device,
+                device="cuda:0",
             ))
         self.embed_text_pad_token = self.thinker_embedding(
             torch.tensor(
                 [talker_hf_config.tts_text_pad_token_id],
                 dtype=torch.long,
-                device=self.device,
+                device="cuda:0",
             ))
         self.embed_codec_bos_token = self.talker_embedding(
             torch.tensor(
                 [talker_hf_config.tts_codec_start_token_id],
                 dtype=torch.long,
-                device=self.device,
+                device="cuda:0",
             ))
         self.embed_codec_eos_token = self.talker_embedding(
             torch.tensor(
                 [talker_hf_config.tts_codec_end_token_id],
                 dtype=torch.long,
-                device=self.device,
+                device="cuda:0",
             ))
         self.embed_codec_pad_token = self.talker_embedding(
             torch.tensor(
                 [talker_hf_config.tts_codec_pad_token_id],
                 dtype=torch.long,
-                device=self.device,
+                device="cuda:0",
             ))
 
     def _get_embed_text_spk_token(self, voice_type: str):
