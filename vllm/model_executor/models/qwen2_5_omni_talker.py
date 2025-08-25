@@ -91,7 +91,7 @@ class Qwen2_5OmniTalkerForConditionalGeneration(nn.Module, SupportsMultiModal,
             vllm_config=vllm_config,
             prefix=maybe_prefix(prefix, "language_model"),
             hf_config=getattr(self.config, 'text_config', self.config),
-            architectures=["Qwen2ForCausalLM_no_prefix"],
+            architectures=["Qwen2Model_no_prefix"],
         )
         self.make_empty_intermediate_tensors = (
             self.language_model.make_empty_intermediate_tensors)
