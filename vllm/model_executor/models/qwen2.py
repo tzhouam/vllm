@@ -304,7 +304,7 @@ class Qwen2Model(nn.Module):
                                             and get_pp_group().is_last_rank):
             self.embed_tokens = VocabParallelEmbedding(
                 config.vocab_size,
-                config.hidden_size,
+                getattr(config,"embedding_size",config.hidden_size),
                 quant_config=quant_config,
                 prefix=f"{prefix}.embed_tokens",
             )
