@@ -466,8 +466,7 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         self.lora_config = lora_config
 
         self.quant_config = quant_config
-        self.model = Qwen2Model(vllm_config=vllm_config,
-                                prefix=maybe_prefix(prefix, "model"))
+        self.model = Qwen2Model(vllm_config=vllm_config)
 
         if get_pp_group().is_last_rank:
             if config.tie_word_embeddings:
