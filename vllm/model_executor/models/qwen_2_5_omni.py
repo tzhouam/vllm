@@ -123,6 +123,8 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         # Set up intermediate tensors
         self.make_empty_intermediate_tensors = (
             self.thinker.make_empty_intermediate_tensors)
+        
+        self.thinker_output_token_ids = torch.empty(0, dtype=torch.long, device="cuda:0")
 
     # -------------------- Device utilities --------------------
     @staticmethod
@@ -184,8 +186,11 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
         generate_audio: bool = True,
-        voice_type: str = "default",
+        voice_type: str = "m02",
         codec: Optional[torch.Tensor] = None,
+        sampling_metadata: Optional[SamplingMetadata] = None,
+        logits_index: Optional[int] = None,
+        sampler = None,
         **kwargs: object,
     ) -> Union[torch.Tensor, IntermediateTensors, OmniOutput]:
         """
@@ -234,9 +239,18 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             _, text_hidden_states = thinker_output
         else:
             text_hidden_states = thinker_output
+        
+        if sampler is not None:
+            sample_hidden = text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states
+            sample_hidden = sample_hidden[logits_index]
+            logits = self.compute_logits(sample_hidden, None)
+            sampler_output = sampler(logits, sampling_metadata).sampled_token_ids
+            self.thinker_output_token_ids = torch.cat([self.thinker_output_token_ids, sampler_output], dim=1)
+        else:
+            sampler_output = None
 
         # Text-only path
-        if not generate_audio and codec is None:
+        if (not generate_audio and codec is None) or (sampler_output is not None and sampler_output.item() != self.thinker_config.eos_token_id):
             return text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states
 
         # 2) Talker (if codec not provided)
@@ -294,9 +308,10 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             # )
             talker_input_ids = None
             talker_positions = None
+            thinker_result = self.thinker.get_input_embeddings(self.thinker_output_token_ids)
             talker_inputs_embeds = self._thinker_to_talker(
                 input_ids=input_ids,
-                thinker_result=text_hidden_states,
+                thinker_result=thinker_result,
                 thinker_kwargs=kwargs,
                 attention_mask=None,
             )["talker_inputs_embeds"]
@@ -306,7 +321,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
                     positions=talker_positions,
                     inputs_embeds=talker_inputs_embeds,
                 )
-                codec = self._convert_to_codec_tokens(talker_hidden)
+                codec = self._convert_to_codec_tokens(talker_hidden, sampling_metadata)
 
         # 3) Token2Wav
         audio_tensor = self._codec_to_audio(codec, voice_type=voice_type)
@@ -819,32 +834,32 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
     #         "talker_attention_mask": talker_attention_mask,
     #     }
 
-    def _convert_to_codec_tokens(self, talker_output: torch.Tensor) -> torch.Tensor:
+    def _convert_to_codec_tokens(self, talker_output: torch.Tensor, sampling_metadata: SamplingMetadata) -> torch.Tensor:
         """
         参考 HF：使用 talker 的 codec 头得到 logits，抑制 BOS，再贪心选取当前步的下一个 codec token。
         """
         with torch.inference_mode():
-            logits = None
-            # 依次尝试多种位置的 codec_head
-            codec_heads = []
-            if hasattr(self.talker, 'codec_head'):
-                codec_heads.append(self.talker.codec_head)
-            if hasattr(self.talker, 'language_model') and hasattr(self.talker.language_model, 'codec_head'):
-                codec_heads.append(self.talker.language_model.codec_head)
-            if hasattr(self.talker, 'language_model') and hasattr(self.talker.language_model, 'model') \
-               and hasattr(self.talker.language_model.model, 'codec_head'):
-                codec_heads.append(self.talker.language_model.model.codec_head)
+            logits = self.talker.compute_logits(talker_output, None)
+            # # 依次尝试多种位置的 codec_head
+            # codec_heads = []
+            # if hasattr(self.talker, 'codec_head'):
+            #     codec_heads.append(self.talker.codec_head)
+            # if hasattr(self.talker, 'language_model') and hasattr(self.talker.language_model, 'codec_head'):
+            #     codec_heads.append(self.talker.language_model.codec_head)
+            # if hasattr(self.talker, 'language_model') and hasattr(self.talker.language_model, 'model') \
+            #    and hasattr(self.talker.language_model.model, 'codec_head'):
+            #     codec_heads.append(self.talker.language_model.model.codec_head)
 
-            for head in codec_heads:
-                try:
-                    logits_tuple = head(talker_output)
-                    if isinstance(logits_tuple, tuple):
-                        logits = logits_tuple[0]
-                    else:
-                        logits = logits_tuple
-                    break
-                except Exception:
-                    continue
+            # for head in codec_heads:
+            #     try:
+            #         logits_tuple = head(talker_output)
+            #         if isinstance(logits_tuple, tuple):
+            #             logits = logits_tuple[0]
+            #         else:
+            #             logits = logits_tuple
+            #         break
+            #     except Exception:
+            #         continue
             # 兜底：若不可用，返回空 codec
             if logits is None:
                 return torch.zeros((talker_output.size(0), 0), dtype=torch.long, device=talker_output.device)
@@ -857,7 +872,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
                 logits[..., bos_id] = -1e9
 
             # 取最后一步位置的分布并贪心选取
-            next_id = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
+            next_id = self.talker.sample(logits, sampling_metadata).sampled_token_ids
             return next_id.to(dtype=torch.long)
 
     def _init_token2wav_model(self):
@@ -952,7 +967,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
                 # Should be initialized in __init__ if config provided
                 self._init_token2wav_model()
             
-            t2w_loaded = self.token2wav.load_weights(token2wav_weights)
+            t2w_loaded = self.token2wav.load_weights(token2wav_weights, os.path.join(self.vllm_config.model_config.model, "spk_dict.pt"))
             t2w_loaded = add_prefix_to_loaded_weights(t2w_loaded, 'token2wav')
             loaded_weights.update(t2w_loaded)
         

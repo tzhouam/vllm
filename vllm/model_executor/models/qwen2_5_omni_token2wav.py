@@ -1382,11 +1382,12 @@ class Qwen2_5OmniToken2WavForConditionalGenerationVLLM(nn.Module, SupportsPP):
                 loaded_buffers.add(name)
         return loaded_buffers
 
-    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]) -> Set[str]:
+    def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]], spk_dict_path: str) -> Set[str]:
         buffers = self.find_all_registers(self)
         weights_to_load = self.remove_buffers_from_weights(weights, buffers)
         loaded = self.load_weights_without_buffers(weights_to_load)
         loaded_buffers = self.reload_buffers_to_model(buffers)
         #merge loaded and loaded_buffers
         loaded.update(loaded_buffers)
+        self.spk_dict = torch.load(spk_dict_path)
         return loaded

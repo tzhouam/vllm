@@ -1499,7 +1499,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.inputs_embeds[:num_scheduled_tokens].copy_(
                 inputs_embeds_scheduled)
 
-            input_ids = None
+            input_ids = self.input_ids[:num_input_tokens] #used for talker
             inputs_embeds = self.inputs_embeds[:num_input_tokens]
             model_mm_kwargs = self._extract_mm_kwargs(scheduler_output)
         else:
@@ -1546,6 +1546,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     model_mm_kwargs,
                     device=self.device,
                 ),
+                sampling_metadata=self.input_batch.sampling_metadata,
+                logits_index=logits_indices,
+                sampler=self.sampler,
             )
 
         if self.use_aux_hidden_state_outputs:
@@ -2264,6 +2267,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         model_mm_kwargs,
                         device=self.device,
                     ),
+                    sampler = None
                 )
 
             if self.use_aux_hidden_state_outputs:
