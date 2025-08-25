@@ -56,7 +56,7 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     make_empty_intermediate_tensors_factory, make_layers,
                     maybe_prefix)
 from torch.nn import Linear
-
+from torch.nn.attention import MultiheadAttention
 
 class Qwen2MLP(nn.Module):
 
@@ -67,7 +67,7 @@ class Qwen2MLP(nn.Module):
         hidden_act: str,
     ) -> None:
         super().__init__()
-        self.gate_up_proj = Linear(
+        self.gate_up_proj = MergedColumnParallelLinear(
             hidden_size,
             [intermediate_size] * 2,
             bias=False,
@@ -132,8 +132,6 @@ class Qwen2Attention(nn.Module):
         self.qkv_proj = Linear(
             hidden_size,
             self.head_dim,
-            self.total_num_heads,
-            self.total_num_kv_heads,
             bias=True,
         )
         self.o_proj = Linear(
@@ -150,17 +148,23 @@ class Qwen2Attention(nn.Module):
             rope_scaling=rope_scaling,
             dual_chunk_attention_config=dual_chunk_attention_config,
         )
-        self.attn = Attention(
+        # self.attn = Attention(
+        #     self.num_heads,
+        #     self.head_dim,
+        #     self.scaling,
+        #     num_kv_heads=self.num_kv_heads,
+        #     cache_config=cache_config,
+        #     attn_type=attn_type,
+        #     **{
+        #         "layer_idx": layer_idx,
+        #         "dual_chunk_attention_config": dual_chunk_attention_config,
+        #     } if dual_chunk_attention_config else {})
+        self.attn = MultiheadAttention(
             self.num_heads,
             self.head_dim,
             self.scaling,
             num_kv_heads=self.num_kv_heads,
-            cache_config=cache_config,
-            attn_type=attn_type,
-            **{
-                "layer_idx": layer_idx,
-                "dual_chunk_attention_config": dual_chunk_attention_config,
-            } if dual_chunk_attention_config else {})
+        )
 
     def forward(
         self,
@@ -283,7 +287,8 @@ class Qwen2Model(nn.Module):
     def __init__(self,
                  *,
                  vllm_config: VllmConfig,
-                 decoder_layer_type: type[nn.Module] = Qwen2DecoderLayer):
+                 decoder_layer_type: type[nn.Module] = Qwen2DecoderLayer,
+                 prefix: str = ""):
         super().__init__()
 
         config = vllm_config.model_config.hf_config
