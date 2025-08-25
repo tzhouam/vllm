@@ -306,18 +306,24 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             #     dtype=torch.long,
             #     device=talker_dev,
             # )
-            talker_input_ids = None
             talker_positions = None
             thinker_result = self.thinker.get_input_embeddings(self.thinker_output_token_ids)
-            talker_inputs_embeds = self._thinker_to_talker(
-                input_ids=input_ids,
-                thinker_result=thinker_result,
-                thinker_kwargs=kwargs,
-                attention_mask=None,
-            )["talker_inputs_embeds"]
+            # talker_inputs_embeds = self._thinker_to_talker(
+            #     input_ids=input_ids,
+            #     thinker_result=thinker_result,
+            #     thinker_kwargs=kwargs,
+            #     attention_mask=None,
+            # )["talker_inputs_embeds"]
+            talker_inputs_ids, talker_inputs_embeds = self._thinker_to_talker(
+                voice_type=voice_type,
+                output_prompt_embeds=thinker_result,
+                output_token_ids=self.thinker_output_token_ids,
+                thinker_prompt_embeds=self.thinker.get_input_embeddings(input_ids),
+                prompt_token_ids=input_ids,
+            )
             with torch.inference_mode():
                 talker_hidden = self.talker(
-                    input_ids=talker_input_ids,
+                    input_ids=talker_inputs_ids,
                     positions=talker_positions,
                     inputs_embeds=talker_inputs_embeds,
                 )
@@ -434,7 +440,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         self,
         voice_type: str,
         output_prompt_embeds,
-        token_ids,
+        output_token_ids,
         thinker_prompt_embeds,
         prompt_token_ids
         # output: RequestOutput,
@@ -498,7 +504,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             # during preprocessing, so we use tts_codec_pad_token_id instead.
             # self._get_text_spk_token_id(voice_type),
             talker_hf_config.tts_codec_pad_token_id,
-            token_ids[0],
+            output_token_ids[0],
 
             # input_ids (will be replaced in model_runner):
             # talker_hf_config.tts_codec_pad_token_id,
