@@ -125,6 +125,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             self.thinker.make_empty_intermediate_tensors)
         
         self.thinker_output_token_ids = torch.empty(0, dtype=torch.long, device="cuda:0")
+        self._init_special_tokens_embeddings()
 
     # -------------------- Device utilities --------------------
     @staticmethod
