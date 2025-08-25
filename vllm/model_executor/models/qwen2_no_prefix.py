@@ -160,10 +160,11 @@ class Qwen2Attention(nn.Module):
         #         "dual_chunk_attention_config": dual_chunk_attention_config,
         #     } if dual_chunk_attention_config else {})
         self.attn = MultiheadAttention(
-            self.num_heads,
-            self.head_dim,
-            self.scaling,
-            num_kv_heads=self.num_kv_heads,
+            embed_dim=hidden_size,
+            num_heads=num_heads,
+            kdim=hidden_size,
+            vdim=hidden_size,
+            bias=True,
         )
 
     def forward(
