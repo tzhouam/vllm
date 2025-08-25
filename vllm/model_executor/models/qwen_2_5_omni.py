@@ -254,7 +254,10 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         if (not generate_audio and codec is None) or \
             (sampler_output is not None and sampler_output.item() != self.thinker_config.eos_token_id) or \
             sampler_output is None:
-            return text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states
+            return OmniOutput(
+                text_hidden_states=text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states,
+                multimodal_outputs=None
+            )
 
         # 2) Talker (if codec not provided)
         if codec is None:
