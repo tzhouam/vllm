@@ -251,7 +251,9 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             sampler_output = None
 
         # Text-only path
-        if (not generate_audio and codec is None) or (sampler_output is not None and sampler_output.item() != self.thinker_config.eos_token_id):
+        if (not generate_audio and codec is None) or \
+            (sampler_output is not None and sampler_output.item() != self.thinker_config.eos_token_id) or \
+            sampler_output is None:
             return text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states
 
         # 2) Talker (if codec not provided)
@@ -319,7 +321,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
                 voice_type=voice_type,
                 output_prompt_embeds=thinker_result,
                 output_token_ids=self.thinker_output_token_ids,
-                thinker_prompt_embeds=self.thinker.get_input_embeddings(input_ids),
+                thinker_prompt_embeds=self.thinker.get_input_embeddings(input_ids.squeeze(0)),
                 prompt_token_ids=input_ids,
             )
             with torch.inference_mode():
