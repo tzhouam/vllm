@@ -100,6 +100,8 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
                 )
         else:
             self.thinker = None
+            self.thinker_embedding = nn.Embedding(152064, 3584)
+
         
         # Initialize talker model wrapper (handles projection + LM)
         self.talker = init_vllm_registered_model(
@@ -364,7 +366,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
     ) -> torch.nn.Embedding:
         
             if kind == 'thinker':
-                return self.thinker.language_model.model.embed_tokens
+                return self.thinker.language_model.model.embed_tokens if self.use_thinker else self.thinker_embedding
             elif kind == 'talker':
                 return self.talker.language_model.model.embed_tokens
             else:
@@ -982,7 +984,6 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             else:
                 for k, v in weights:
                     if k == "thinker.model.embed_tokens.weight":
-                        self.thinker_embedding = nn.Embedding(v.shape[0], v.shape[1])
                         self.thinker_embedding.weight = nn.Parameter(v)
         
         # Load talker weights
