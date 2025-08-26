@@ -504,10 +504,10 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         # if len(output.outputs[0].token_ids) == 2:
             # issue request
         prompt_embeds = torch.cat([
-            thinker_prompt_embeds.squeeze(0),
+            thinker_prompt_embeds,
             self._get_embed_text_spk_token(voice_type) +
             self.embed_codec_pad_token,
-            output_prompt_embeds + self.embed_codec_bos_token,
+            output_prompt_embeds.squeeze(0) + self.embed_codec_bos_token,
         ],
                                     dim=0)
         # prompt, sampling_params = self.talker_requests.pop(request_id)
