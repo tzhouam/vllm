@@ -59,201 +59,201 @@ from torch.nn import Linear
 from torch.nn import MultiheadAttention
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import Qwen2_5OmniDecoderLayer
 
-class Qwen2MLP(nn.Module):
+# class Qwen2MLP(nn.Module):
 
-    def __init__(
-        self,
-        hidden_size: int,
-        intermediate_size: int,
-        hidden_act: str,
-    ) -> None:
-        super().__init__()
-        self.gate_up_proj = MergedColumnParallelLinear(
-            hidden_size,
-            [intermediate_size] * 2,
-            bias=False,
+#     def __init__(
+#         self,
+#         hidden_size: int,
+#         intermediate_size: int,
+#         hidden_act: str,
+#     ) -> None:
+#         super().__init__()
+#         self.gate_up_proj = MergedColumnParallelLinear(
+#             hidden_size,
+#             [intermediate_size] * 2,
+#             bias=False,
 
-        )
-        self.down_proj = Linear(
-            intermediate_size,
-            hidden_size,
-            bias=False, 
-        )
-        if hidden_act != "silu":
-            raise ValueError(f"Unsupported activation: {hidden_act}. "
-                             "Only silu is supported for now.")
-        self.act_fn = SiluAndMul()
+#         )
+#         self.down_proj = Linear(
+#             intermediate_size,
+#             hidden_size,
+#             bias=False, 
+#         )
+#         if hidden_act != "silu":
+#             raise ValueError(f"Unsupported activation: {hidden_act}. "
+#                              "Only silu is supported for now.")
+#         self.act_fn = SiluAndMul()
 
-    def forward(self, x):
-        gate_up, _ = self.gate_up_proj(x)
-        x = self.act_fn(gate_up)
-        x, _ = self.down_proj(x)
-        return x
-
-
-class Qwen2Attention(nn.Module):
-
-    def __init__(
-        self,
-        hidden_size: int,
-        num_heads: int,
-        num_kv_heads: int,
-        max_position: int = 4096 * 32,
-        rope_theta: float = 10000,
-        cache_config: Optional[CacheConfig] = None, 
-        rope_scaling: Optional[tuple] = None,
-
-        attn_type: str = AttentionType.DECODER,
-        dual_chunk_attention_config: Optional[dict[str, Any]] = None,
-        layer_idx: int = 0,
-    ) -> None:
-        super().__init__()
-        self.hidden_size = hidden_size
-        tp_size = get_tensor_model_parallel_world_size()
-        self.total_num_heads = num_heads
-        assert self.total_num_heads % tp_size == 0
-        self.num_heads = self.total_num_heads // tp_size
-        self.total_num_kv_heads = num_kv_heads
-        if self.total_num_kv_heads >= tp_size:
-            # Number of KV heads is greater than TP size, so we partition
-            # the KV heads across multiple tensor parallel GPUs.
-            assert self.total_num_kv_heads % tp_size == 0
-        else:
-            # Number of KV heads is less than TP size, so we replicate
-            # the KV heads across multiple tensor parallel GPUs.
-            assert tp_size % self.total_num_kv_heads == 0
-        self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
-        self.head_dim = hidden_size // self.total_num_heads
-        self.q_size = self.num_heads * self.head_dim
-        self.kv_size = self.num_kv_heads * self.head_dim
-        self.scaling = self.head_dim**-0.5
-        self.rope_theta = rope_theta
-        self.dual_chunk_attention_config = dual_chunk_attention_config
-
-        self.qkv_proj = Linear(
-            hidden_size,
-            self.head_dim,
-            bias=True,
-        )
-        self.o_proj = Linear(
-            self.total_num_heads * self.head_dim,
-            hidden_size,
-            bias=False,
-        )
-
-        self.rotary_emb = get_rope(
-            self.head_dim,
-            rotary_dim=self.head_dim,
-            max_position=max_position,
-            base=self.rope_theta,
-            rope_scaling=rope_scaling,
-            dual_chunk_attention_config=dual_chunk_attention_config,
-        )
-        # self.attn = Attention(
-        #     self.num_heads,
-        #     self.head_dim,
-        #     self.scaling,
-        #     num_kv_heads=self.num_kv_heads,
-        #     cache_config=cache_config,
-        #     attn_type=attn_type,
-        #     **{
-        #         "layer_idx": layer_idx,
-        #         "dual_chunk_attention_config": dual_chunk_attention_config,
-        #     } if dual_chunk_attention_config else {})
-        self.attn = MultiheadAttention(
-            embed_dim=hidden_size,
-            num_heads=num_heads,
-            kdim=hidden_size,
-            vdim=hidden_size,
-            bias=True,
-        )
-
-    def forward(
-        self,
-        positions: torch.Tensor,
-        hidden_states: torch.Tensor,
-    ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        q, k = self.rotary_emb(positions, q, k)
-        attn_output = self.attn(q, k, v)
-        output, _ = self.o_proj(attn_output)
-        return output
+#     def forward(self, x):
+#         gate_up, _ = self.gate_up_proj(x)
+#         x = self.act_fn(gate_up)
+#         x, _ = self.down_proj(x)
+#         return x
 
 
-class Qwen2DecoderLayer(nn.Module):
+# class Qwen2Attention(nn.Module):
 
-    def __init__(
-        self,
-        config: Qwen2Config,
-        cache_config: Optional[CacheConfig] = None,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-        layer_idx: int = 0,
-    ) -> None:
-        super().__init__()
-        self.hidden_size = config.hidden_size
-        # Requires transformers > 4.32.0
-        rope_theta = getattr(config, "rope_theta", 1000000)
-        rope_scaling = getattr(config, "rope_scaling", None)
-        dual_chunk_attention_config = getattr(config,
-                                              "dual_chunk_attention_config",
-                                              None)
+#     def __init__(
+#         self,
+#         hidden_size: int,
+#         num_heads: int,
+#         num_kv_heads: int,
+#         max_position: int = 4096 * 32,
+#         rope_theta: float = 10000,
+#         cache_config: Optional[CacheConfig] = None, 
+#         rope_scaling: Optional[tuple] = None,
 
-        # By default, Qwen2 uses causal attention as it is a decoder-only model.
-        # You can override the HF config with `is_causal=False` to enable
-        # bidirectional attention, which is used in some embedding models
-        # (e.g. Alibaba-NLP/gte-Qwen2-7B-instruct)
-        if getattr(config, "is_causal", True):
-            attn_type = AttentionType.DECODER
-        else:
-            attn_type = AttentionType.ENCODER_ONLY
+#         attn_type: str = AttentionType.DECODER,
+#         dual_chunk_attention_config: Optional[dict[str, Any]] = None,
+#         layer_idx: int = 0,
+#     ) -> None:
+#         super().__init__()
+#         self.hidden_size = hidden_size
+#         tp_size = get_tensor_model_parallel_world_size()
+#         self.total_num_heads = num_heads
+#         assert self.total_num_heads % tp_size == 0
+#         self.num_heads = self.total_num_heads // tp_size
+#         self.total_num_kv_heads = num_kv_heads
+#         if self.total_num_kv_heads >= tp_size:
+#             # Number of KV heads is greater than TP size, so we partition
+#             # the KV heads across multiple tensor parallel GPUs.
+#             assert self.total_num_kv_heads % tp_size == 0
+#         else:
+#             # Number of KV heads is less than TP size, so we replicate
+#             # the KV heads across multiple tensor parallel GPUs.
+#             assert tp_size % self.total_num_kv_heads == 0
+#         self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
+#         self.head_dim = hidden_size // self.total_num_heads
+#         self.q_size = self.num_heads * self.head_dim
+#         self.kv_size = self.num_kv_heads * self.head_dim
+#         self.scaling = self.head_dim**-0.5
+#         self.rope_theta = rope_theta
+#         self.dual_chunk_attention_config = dual_chunk_attention_config
 
-        self.self_attn = Qwen2Attention(
-            hidden_size=self.hidden_size,
-            num_heads=config.num_attention_heads,
-            max_position=config.max_position_embeddings,
-            num_kv_heads=config.num_key_value_heads,
-            rope_theta=rope_theta,
-            cache_config=cache_config,
-            rope_scaling=rope_scaling,
-            attn_type=attn_type,
-            dual_chunk_attention_config=dual_chunk_attention_config,
-            layer_idx=layer_idx,
-        )
-        self.mlp = Qwen2MLP(
-            hidden_size=self.hidden_size,
-            intermediate_size=config.intermediate_size,
-            hidden_act=config.hidden_act,
-        )
-        self.input_layernorm = RMSNorm(config.hidden_size,
-                                       eps=config.rms_norm_eps)
-        self.post_attention_layernorm = RMSNorm(config.hidden_size,
-                                                eps=config.rms_norm_eps)
+#         self.qkv_proj = Linear(
+#             hidden_size,
+#             self.head_dim,
+#             bias=True,
+#         )
+#         self.o_proj = Linear(
+#             self.total_num_heads * self.head_dim,
+#             hidden_size,
+#             bias=False,
+#         )
 
-    def forward(
-        self,
-        positions: torch.Tensor,
-        hidden_states: torch.Tensor,
-        residual: Optional[torch.Tensor],
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        # Self Attention
-        if residual is None:
-            residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
-        else:
-            hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
-        hidden_states = self.self_attn(
-            positions=positions,
-            hidden_states=hidden_states,
-        )
+#         self.rotary_emb = get_rope(
+#             self.head_dim,
+#             rotary_dim=self.head_dim,
+#             max_position=max_position,
+#             base=self.rope_theta,
+#             rope_scaling=rope_scaling,
+#             dual_chunk_attention_config=dual_chunk_attention_config,
+#         )
+#         # self.attn = Attention(
+#         #     self.num_heads,
+#         #     self.head_dim,
+#         #     self.scaling,
+#         #     num_kv_heads=self.num_kv_heads,
+#         #     cache_config=cache_config,
+#         #     attn_type=attn_type,
+#         #     **{
+#         #         "layer_idx": layer_idx,
+#         #         "dual_chunk_attention_config": dual_chunk_attention_config,
+#         #     } if dual_chunk_attention_config else {})
+#         self.attn = MultiheadAttention(
+#             embed_dim=hidden_size,
+#             num_heads=num_heads,
+#             kdim=hidden_size,
+#             vdim=hidden_size,
+#             bias=True,
+#         )
 
-        # Fully Connected
-        hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
-        hidden_states = self.mlp(hidden_states)
-        return hidden_states, residual
+#     def forward(
+#         self,
+#         positions: torch.Tensor,
+#         hidden_states: torch.Tensor,
+#     ) -> torch.Tensor:
+#         qkv, _ = self.qkv_proj(hidden_states)
+#         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+#         q, k = self.rotary_emb(positions, q, k)
+#         attn_output = self.attn(q, k, v)
+#         output, _ = self.o_proj(attn_output)
+#         return output
+
+
+# class Qwen2DecoderLayer(nn.Module):
+
+#     def __init__(
+#         self,
+#         config: Qwen2Config,
+#         cache_config: Optional[CacheConfig] = None,
+#         quant_config: Optional[QuantizationConfig] = None,
+#         prefix: str = "",
+#         layer_idx: int = 0,
+#     ) -> None:
+#         super().__init__()
+#         self.hidden_size = config.hidden_size
+#         # Requires transformers > 4.32.0
+#         rope_theta = getattr(config, "rope_theta", 1000000)
+#         rope_scaling = getattr(config, "rope_scaling", None)
+#         dual_chunk_attention_config = getattr(config,
+#                                               "dual_chunk_attention_config",
+#                                               None)
+
+#         # By default, Qwen2 uses causal attention as it is a decoder-only model.
+#         # You can override the HF config with `is_causal=False` to enable
+#         # bidirectional attention, which is used in some embedding models
+#         # (e.g. Alibaba-NLP/gte-Qwen2-7B-instruct)
+#         if getattr(config, "is_causal", True):
+#             attn_type = AttentionType.DECODER
+#         else:
+#             attn_type = AttentionType.ENCODER_ONLY
+
+#         self.self_attn = Qwen2Attention(
+#             hidden_size=self.hidden_size,
+#             num_heads=config.num_attention_heads,
+#             max_position=config.max_position_embeddings,
+#             num_kv_heads=config.num_key_value_heads,
+#             rope_theta=rope_theta,
+#             cache_config=cache_config,
+#             rope_scaling=rope_scaling,
+#             attn_type=attn_type,
+#             dual_chunk_attention_config=dual_chunk_attention_config,
+#             layer_idx=layer_idx,
+#         )
+#         self.mlp = Qwen2MLP(
+#             hidden_size=self.hidden_size,
+#             intermediate_size=config.intermediate_size,
+#             hidden_act=config.hidden_act,
+#         )
+#         self.input_layernorm = RMSNorm(config.hidden_size,
+#                                        eps=config.rms_norm_eps)
+#         self.post_attention_layernorm = RMSNorm(config.hidden_size,
+#                                                 eps=config.rms_norm_eps)
+
+#     def forward(
+#         self,
+#         positions: torch.Tensor,
+#         hidden_states: torch.Tensor,
+#         residual: Optional[torch.Tensor],
+#     ) -> tuple[torch.Tensor, torch.Tensor]:
+#         # Self Attention
+#         if residual is None:
+#             residual = hidden_states
+#             hidden_states = self.input_layernorm(hidden_states)
+#         else:
+#             hidden_states, residual = self.input_layernorm(
+#                 hidden_states, residual)
+#         hidden_states = self.self_attn(
+#             positions=positions,
+#             hidden_states=hidden_states,
+#         )
+
+#         # Fully Connected
+#         hidden_states, residual = self.post_attention_layernorm(
+#             hidden_states, residual)
+#         hidden_states = self.mlp(hidden_states)
+#         return hidden_states, residual
 
 
 def make_layers(
@@ -289,7 +289,7 @@ class Qwen2Model(nn.Module):
     def __init__(self,
                  *,
                  vllm_config: VllmConfig,
-                 decoder_layer_type: type[nn.Module] = Qwen2DecoderLayer,
+                 decoder_layer_type: type[nn.Module] = Qwen2_5OmniDecoderLayer,
                  prefix: str = ""):
         super().__init__()
 
@@ -387,11 +387,11 @@ class Qwen2Model(nn.Module):
                                                    torch.Tensor]]) -> set[str]:
         stacked_params_mapping = [
             # (param_name, shard_name, shard_id)
-            ("qkv_proj", "q_proj", "q"),
-            ("qkv_proj", "k_proj", "k"),
-            ("qkv_proj", "v_proj", "v"),
-            ("gate_up_proj", "gate_proj", 0),
-            ("gate_up_proj", "up_proj", 1),
+            # ("qkv_proj", "q_proj", "q"),
+            # ("qkv_proj", "k_proj", "k"),
+            # ("qkv_proj", "v_proj", "v"),
+            # ("gate_up_proj", "gate_proj", 0),
+            # ("gate_up_proj", "up_proj", 1),
         ]
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         loaded_params: set[str] = set()
