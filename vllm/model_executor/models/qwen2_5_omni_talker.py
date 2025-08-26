@@ -46,6 +46,7 @@ from .utils import (AutoWeightsLoader, WeightsMapper,
                     init_vllm_registered_model,
                     maybe_prefix)
 
+
 @MULTIMODAL_REGISTRY.register_processor(
     Qwen2_5OmniThinkerMultiModalProcessor,
     info=Qwen2_5OmniThinkerProcessingInfo,

@@ -88,14 +88,18 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         talker_config: Qwen2_5OmniTalkerConfig = config.talker_config
         self.talker_config = talker_config
         
-        # Initialize thinker model (multimodal processing)
-        self.thinker = init_vllm_registered_model(
-            vllm_config=vllm_config,
-            prefix=maybe_prefix(prefix, "thinker"),
-            hf_config=thinker_config,
-            # Use registry architecture key
-            architectures=["Qwen2_5OmniThinkerModel"],
-        )
+        self.use_thinker = True
+        if self.use_thinker:
+            # Initialize thinker model (multimodal processing)
+            self.thinker = init_vllm_registered_model(
+                vllm_config=vllm_config,
+                prefix=maybe_prefix(prefix, "thinker"),
+                hf_config=thinker_config,
+                # Use registry architecture key
+                architectures=["Qwen2_5OmniThinkerModel"],
+                )
+        else:
+            self.thinker = None
         
         # Initialize talker model wrapper (handles projection + LM)
         self.talker = init_vllm_registered_model(
@@ -122,7 +126,7 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         
         # Set up intermediate tensors
         self.make_empty_intermediate_tensors = (
-            self.thinker.make_empty_intermediate_tensors)
+            self.thinker.make_empty_intermediate_tensors) if self.use_thinker else lambda: None
         
         self.thinker_output_token_ids = torch.empty(0, dtype=torch.long, device="cuda:0")
         self._init_special_tokens_embeddings()
@@ -172,9 +176,13 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         input_ids: torch.Tensor,
         multimodal_embeddings=None,
     ) -> torch.Tensor:
-        # Use thinker model for input embeddings (handles multimodal inputs)
-        return self.thinker.get_input_embeddings(
-            input_ids, multimodal_embeddings)
+        if self.use_thinker:
+            # Use thinker model for input embeddings (handles multimodal inputs)
+            return self.thinker.get_input_embeddings(
+                input_ids, multimodal_embeddings)
+        else:
+            return self.talker.get_input_embeddings(
+                input_ids, multimodal_embeddings)
 
     def get_multimodal_embeddings(self, **kwargs):
         # Delegate to thinker model for multimodal processing
@@ -201,63 +209,65 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         3) If audio requested (or codec provided), use token2wav to synthesize waveform.
         4) Return text hidden states (and audio when applicable).
         """
+        if self.use_thinker:
+            # Normalize to batched inputs if caller provides 1D/2D unbatched tensors
+            added_batch_dim = False
+            if input_ids is not None and input_ids.ndim == 1:
+                input_ids = input_ids.unsqueeze(0)
+                added_batch_dim = True
+            if positions is not None and positions.ndim == 1:
+                positions = positions.unsqueeze(0)
+                added_batch_dim = True
+            if inputs_embeds is not None and inputs_embeds.ndim == 2:
+                inputs_embeds = inputs_embeds.unsqueeze(0)
+                added_batch_dim = True
+            thinker_dev = self._module_device(self.thinker)
+            
+            #if input_ids is None, set it to an zero tenser, in the length of the same as the embedding seq length
+            if input_ids is None:
+                input_ids = torch.zeros(inputs_embeds.shape[1], dtype=torch.long, device=thinker_dev).unsqueeze(0) #(1, 0)
+                added_batch_dim = True
 
-        # Normalize to batched inputs if caller provides 1D/2D unbatched tensors
-        added_batch_dim = False
-        if input_ids is not None and input_ids.ndim == 1:
-            input_ids = input_ids.unsqueeze(0)
-            added_batch_dim = True
-        if positions is not None and positions.ndim == 1:
-            positions = positions.unsqueeze(0)
-            added_batch_dim = True
-        if inputs_embeds is not None and inputs_embeds.ndim == 2:
-            inputs_embeds = inputs_embeds.unsqueeze(0)
-            added_batch_dim = True
-        thinker_dev = self._module_device(self.thinker)
-        
-        #if input_ids is None, set it to an zero tenser, in the length of the same as the embedding seq length
-        if input_ids is None:
-            input_ids = torch.zeros(inputs_embeds.shape[1], dtype=torch.long, device=thinker_dev).unsqueeze(0) #(1, 0)
-            added_batch_dim = True
-
-        # 1) Thinker (ensure inputs on thinker's device)
-        if input_ids is not None and input_ids.device != thinker_dev:
-            input_ids = input_ids.to(thinker_dev)
-        if positions is not None and positions.device != thinker_dev:
-            positions = positions.to(thinker_dev)
-        if inputs_embeds is not None and inputs_embeds.device != thinker_dev:
-            inputs_embeds = inputs_embeds.to(thinker_dev)
-        # Run thinker
-        thinker_output = self.thinker(
-            input_ids=input_ids,
-            positions=positions,
-            intermediate_tensors=intermediate_tensors,
-            inputs_embeds=inputs_embeds,
-            **kwargs,
-        )
-
-        if isinstance(thinker_output, tuple):
-            _, text_hidden_states = thinker_output
-        else:
-            text_hidden_states = thinker_output
-        
-        if sampler is not None:
-            sample_hidden = text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states
-            sample_hidden = sample_hidden[logits_index]
-            logits = self.compute_logits(sample_hidden, None)
-            sampler_output = sampler(logits, sampling_metadata).sampled_token_ids
-            self.thinker_output_token_ids = torch.cat([self.thinker_output_token_ids, sampler_output], dim=1)
-        else:
-            sampler_output = None
-
-        # Text-only path
-        if (not generate_audio and codec is None) or \
-            (sampler_output is not None and sampler_output.item() != self.thinker_config.eos_token_id) or \
-            sampler_output is None:
-            return OmniOutput(
-                text_hidden_states=text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states,
-                multimodal_outputs=None
+            # 1) Thinker (ensure inputs on thinker's device)
+            if input_ids is not None and input_ids.device != thinker_dev:
+                input_ids = input_ids.to(thinker_dev)
+            if positions is not None and positions.device != thinker_dev:
+                positions = positions.to(thinker_dev)
+            if inputs_embeds is not None and inputs_embeds.device != thinker_dev:
+                inputs_embeds = inputs_embeds.to(thinker_dev)
+            # Run thinker
+            thinker_output = self.thinker(
+                input_ids=input_ids,
+                positions=positions,
+                intermediate_tensors=intermediate_tensors,
+                inputs_embeds=inputs_embeds,
+                **kwargs,
             )
+
+            if isinstance(thinker_output, tuple):
+                _, text_hidden_states = thinker_output
+            else:
+                text_hidden_states = thinker_output
+            
+            if sampler is not None:
+                sample_hidden = text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states
+                sample_hidden = sample_hidden[logits_index]
+                logits = self.compute_logits(sample_hidden, None)
+                sampler_output = sampler(logits, sampling_metadata).sampled_token_ids
+                self.thinker_output_token_ids = torch.cat([self.thinker_output_token_ids, sampler_output], dim=1)
+            else:
+                sampler_output = None
+
+            # Text-only path
+            if (not generate_audio and codec is None) or \
+                (sampler_output is not None and sampler_output.item() != self.thinker_config.eos_token_id) or \
+                sampler_output is None:
+                return OmniOutput(
+                    text_hidden_states=text_hidden_states.squeeze(0) if added_batch_dim else text_hidden_states,
+                    multimodal_outputs=None
+                )
+        
+            
 
         # 2) Talker (if codec not provided)
         if codec is None:
@@ -320,6 +330,10 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
             #     thinker_kwargs=kwargs,
             #     attention_mask=None,
             # )["talker_inputs_embeds"]
+            if not self.use_thinker:
+                thinker_pt = torch.load("thinker_output.pt")
+                output_token_ids = thinker_pt.outputs[0].token_ids
+                input_ids = thinker_pt.prompt_token_ids
             talker_inputs_ids, talker_inputs_embeds = self._thinker_to_talker(
                 voice_type=voice_type,
                 output_prompt_embeds=thinker_result,
@@ -961,9 +975,15 @@ class Qwen2_5OmniForConditionalGeneration(nn.Module, SupportsMultiModal,
         # Load thinker weights
         # thinker_weights = [(k, v) for k, v in weights if k.startswith('thinker.')]
         if thinker_weights:
-            thinker_loaded = self.thinker.load_weights(thinker_weights)
-            thinker_loaded = add_prefix_to_loaded_weights(thinker_loaded, 'thinker')
-            loaded_weights.update(thinker_loaded)
+            if self.use_thinker:
+                thinker_loaded = self.thinker.load_weights(thinker_weights)
+                thinker_loaded = add_prefix_to_loaded_weights(thinker_loaded, 'thinker')
+                loaded_weights.update(thinker_loaded)
+            else:
+                for k, v in weights:
+                    if k == "thinker.model.embed_tokens.weight":
+                        self.thinker_embedding = nn.Embedding(v.shape[0], v.shape[1])
+                        self.thinker_embedding.weight = nn.Parameter(v)
         
         # Load talker weights
         # talker_weights = [(k, v) for k, v in weights if k.startswith('talker.')]
