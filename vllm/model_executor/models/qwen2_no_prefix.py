@@ -57,6 +57,7 @@ from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
                     maybe_prefix)
 from torch.nn import Linear
 from torch.nn import MultiheadAttention
+from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import Qwen2_5OmniDecoderLayer
 
 class Qwen2MLP(nn.Module):
 
@@ -323,12 +324,11 @@ class Qwen2Model(nn.Module):
             self.embed_tokens = PPMissingLayer()
 
         # Use the provided decoder layer type or default to Qwen2DecoderLayer
-        decoder_layer_type = decoder_layer_type or Qwen2DecoderLayer
+        decoder_layer_type = Qwen2_5OmniDecoderLayer
+
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
             lambda layer_idx: decoder_layer_type(config=config,
-                                              cache_config=cache_config,
-                                              quant_config=quant_config,
                                               layer_idx=layer_idx),
         )
 
