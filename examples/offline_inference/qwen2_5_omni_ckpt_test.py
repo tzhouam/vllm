@@ -94,7 +94,7 @@ import soundfile as sf
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
-from vllm.engine.async_llm_engine import AsyncEngineArgs
+from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.inputs import TextPrompt, TokensPrompt
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
@@ -109,7 +109,10 @@ try:
 except Exception:
     _HF_AVAILABLE = False
 
-from vllm.engine.async_llm_engine import AsyncLLMEngine, AsyncEngineArgs
+import os as _os_env_toggle
+_os_env_toggle.environ["VLLM_USE_V1"] = "1"
+from vllm.v1.engine.async_llm import AsyncLLM
+from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.sampling_params import SamplingParams
 from vllm.transformers_utils.tokenizer import get_tokenizer
 
@@ -205,9 +208,9 @@ def ensure_config(model_dir: str, code2wav_dir: str | None, dit_ckpt: str | None
     with open(cfg_path, 'w', encoding='utf-8') as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
 
-def get_model_instance(engine: AsyncLLMEngine):
-    # Access underlying model instance from engine internals
-    return engine.engine.llm_engine.model_executor.driver_worker.model_runner.model
+def get_model_instance(engine):
+    # V1 AsyncLLM 不暴露底层模型句柄；如需底层信息，请通过 EngineCore/collective_rpc 查询
+    return None
 
 def resample_wav_to_16khz(input_filepath):
     data, original_sample_rate = sf.read(input_filepath)
@@ -522,15 +525,25 @@ def main():
         enforce_eager=True,
         seed=SEED,  # Set deterministic seed
     )
-    engine = AsyncLLMEngine.from_engine_args(engine_args)
+    engine = AsyncLLM.from_engine_args(engine_args)
 
     # 5) Use deterministic sampling parameters
+    # sampling = SamplingParams(
+    #     temperature=0.0,    # Deterministic - no randomness
+    #     top_p=1.0,          # Disable nucleus sampling
+    #     top_k=-1,           # Disable top-k sampling
+    #     max_tokens=128,
+    #     seed=SEED,          # Fixed seed for sampling
+    # )
+
     sampling = SamplingParams(
-        temperature=0.0,    # Deterministic - no randomness
-        top_p=1.0,          # Disable nucleus sampling
-        top_k=-1,           # Disable top-k sampling
-        max_tokens=128,
-        seed=SEED,          # Fixed seed for sampling
+        temperature=0.9,
+        top_k=40,
+        top_p=0.8,
+        repetition_penalty=1.05,
+        max_tokens=2048,
+        detokenize=False,
+        seed=SEED,
     )
 
     print(f"Sampling parameters: temperature={sampling.temperature}, top_p={sampling.top_p}, seed={sampling.seed}")
