@@ -92,7 +92,17 @@ add_custom_target(_vllm_fa4_cutedsl_C)
 # so edits to cute-dsl Python files take effect immediately without rebuilding.
 # Otherwise, copy files and transform flash_attn.cute imports to
 # vllm.vllm_flash_attn.cute to match our package structure.
-if(VLLM_FLASH_ATTN_SRC_DIR)
+# [edge-infer W2] ... AND NOT WIN32. Creating a symbolic link on Windows needs
+# either Administrator rights or Developer Mode; without them CMake fails the
+# install step outright:
+#   file failed to create symbolic link '.../vllm/vllm_flash_attn/cute'
+#   "A required privilege is not held by the client"
+# and that sinks the whole wheel AFTER every kernel has compiled and linked.
+# The symlink is only a developer convenience ("edits take effect immediately
+# without rebuilding"); the else() branch below copies the files and rewrites the
+# flash_attn.cute imports, which is what a non-local build does anyway and what
+# belongs in a wheel. Take the copy path on Windows.
+if(VLLM_FLASH_ATTN_SRC_DIR AND NOT WIN32)
   install(CODE "
     set(LINK_TARGET \"${vllm-flash-attn_SOURCE_DIR}/flash_attn/cute\")
     set(LINK_NAME \"\${CMAKE_INSTALL_PREFIX}/vllm/vllm_flash_attn/cute\")

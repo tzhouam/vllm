@@ -270,9 +270,17 @@ endif()
 # Set CUDA include flags for CXX compiler.
 #
 if(VLLM_GPU_LANG STREQUAL "CUDA")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I${CUDA_TOOLKIT_ROOT_DIR}/include")
+  # [edge-infer W2] Quote the include paths.
+  #
+  # These are appended to a flags *string*, so an unquoted path with spaces is
+  # split by the compiler driver. The default Windows CUDA location is
+  # "C:/Program Files/NVIDIA GPU Computing Toolkit/...", which MSVC then reads as
+  # the separate source files "Files/NVIDIA", "GPU" and "Computing"
+  # (fatal error C1083). POSIX paths have no spaces, so quoting changes nothing
+  # there.
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I\"${CUDA_TOOLKIT_ROOT_DIR}/include\"")
   if(CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I${CUDA_TOOLKIT_ROOT_DIR}/include/cccl")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I\"${CUDA_TOOLKIT_ROOT_DIR}/include/cccl\"")
   endif()
 endif()
 
@@ -379,6 +387,23 @@ if(VLLM_GPU_LANG STREQUAL "HIP")
 endif() # _C HIP endif
 
 if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
+  # [edge-infer W2] Opt-in for the CUTLASS 3.x / CuTe kernel groups on Windows.
+  #
+  # They were first disabled on the diagnosis "CuTe cannot compile under MSVC",
+  # which was WRONG: a 3-line probe (cuteprobe/) showed it is an MSVC C++20
+  # conformance-mode bug that -Xcompiler=/permissive fixes, on CUTLASS 3.8.0 and
+  # 4.7.1. Re-enabling them is owed work, but each is an independent MSVC failure
+  # point and a build takes ~45 min here, so it is a switch rather than a default:
+  #   CMAKE_ARGS=-DVLLM_WIN_CUTLASS_GROUPS=ON
+  # turns FP8/NVFP4 scaled_mm, DeepGEMM, FlashKDA, QuTLASS and tml-fa4 back on.
+  # OFF keeps the shape that produced the recorded W2 wheel. No effect off Windows.
+  option(VLLM_WIN_CUTLASS_GROUPS "Windows: build the CUTLASS/CuTe kernel groups" OFF)
+  if(WIN32 AND NOT VLLM_WIN_CUTLASS_GROUPS)
+    set(VLLM_WIN_SKIP_CUTLASS ON)
+    message(STATUS "[edge-infer W2] Windows: CUTLASS/CuTe kernel groups are OFF (-DVLLM_WIN_CUTLASS_GROUPS=ON to build them)")
+  else()
+    set(VLLM_WIN_SKIP_CUTLASS OFF)
+  endif()
   #
   # _C_stable_libtorch extension (ops registered via STABLE_TORCH_LIBRARY)
   #
@@ -822,7 +847,18 @@ if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
   else()
     cuda_archs_loose_intersection(SCALED_MM_ARCHS "12.0a;12.1a" "${CUDA_ARCHS}")
   endif()
-  if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.8 AND SCALED_MM_ARCHS)
+  # [edge-infer W2] Disabled on Windows. These groups are CUTLASS 3.x / CuTe, and
+  # nvcc's generated host stub (tmpxft_*.cudafe1.cpp) does not compile under MSVC:
+  # it emits e.g. Copy_Traits<AutoVectorizingCopyWithAssumedAlignment<MaxVecBits>,>
+  # -- an empty pack expansion -- and cl.exe rejects it with C3545 (parameter pack
+  # must be trailing), cascading into C2976/C2062 across 21 CuTe headers. The defect
+  # is in the generated intermediate, not in vLLM's sources, so there is nothing
+  # here to patch. Using vLLM's own capability switch rather than deleting files:
+  # not appending the sources also leaves -DENABLE_* undefined, so torch_bindings
+  # compiles the corresponding ops out cleanly, which is what this switch is for.
+  # COST: the Windows wheel has no FP8/NVFP4 CUTLASS GEMM. bf16/fp16 dense is
+  # unaffected, which is the path W0/W1 parity exercises.
+  if(NOT VLLM_WIN_SKIP_CUTLASS AND ${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.8 AND SCALED_MM_ARCHS)
     set(SCALED_MM_SM120_SRCS
       "csrc/quantization/w8a8/cutlass/scaled_mm_c3x_sm120.cu"
       "csrc/quantization/w8a8/cutlass/c3x/scaled_mm_sm120_fp8.cu"
@@ -890,7 +926,7 @@ if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
     "7.5;8.0;8.7;8.9+PTX" "${CUDA_ARCHS}")
   # subtract out the archs that are already built for 3x
   list(REMOVE_ITEM SCALED_MM_2X_ARCHS ${SCALED_MM_3X_ARCHS})
-  if (SCALED_MM_2X_ARCHS)
+  if (NOT VLLM_WIN_SKIP_CUTLASS AND SCALED_MM_2X_ARCHS)
     set(SCALED_MM_C2X_SRCS "csrc/quantization/w8a8/cutlass/scaled_mm_c2x.cu")
     set_gencode_flags_for_srcs(
       SRCS "${SCALED_MM_C2X_SRCS}"
@@ -996,7 +1032,18 @@ if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
   else()
     cuda_archs_loose_intersection(FP4_SM120_ARCHS "12.0a;12.1a" "${CUDA_ARCHS}")
   endif()
-  if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.8 AND FP4_SM120_ARCHS)
+  # [edge-infer W2] Disabled on Windows. These groups are CUTLASS 3.x / CuTe, and
+  # nvcc's generated host stub (tmpxft_*.cudafe1.cpp) does not compile under MSVC:
+  # it emits e.g. Copy_Traits<AutoVectorizingCopyWithAssumedAlignment<MaxVecBits>,>
+  # -- an empty pack expansion -- and cl.exe rejects it with C3545 (parameter pack
+  # must be trailing), cascading into C2976/C2062 across 21 CuTe headers. The defect
+  # is in the generated intermediate, not in vLLM's sources, so there is nothing
+  # here to patch. Using vLLM's own capability switch rather than deleting files:
+  # not appending the sources also leaves -DENABLE_* undefined, so torch_bindings
+  # compiles the corresponding ops out cleanly, which is what this switch is for.
+  # COST: the Windows wheel has no FP8/NVFP4 CUTLASS GEMM. bf16/fp16 dense is
+  # unaffected, which is the path W0/W1 parity exercises.
+  if(NOT VLLM_WIN_SKIP_CUTLASS AND ${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.8 AND FP4_SM120_ARCHS)
     set(FP4_SM120_SRCS
       "csrc/quantization/fp4/nvfp4_quant_kernels.cu"
       "csrc/quantization/fp4/activation_nvfp4_quant_fusion_kernels.cu"
@@ -1223,6 +1270,22 @@ if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
   # Needed to use cuda/hip APIs from C-shim
   if(VLLM_GPU_LANG STREQUAL "CUDA")
     target_compile_definitions(_C_stable_libtorch PRIVATE USE_CUDA)
+
+  # [edge-infer W2] Name cuBLAS explicitly on Windows. csrc/libtorch_stable/
+  # quantization/gptq/q_gemm.cu calls cublasHgemm and the allspark kernels call
+  # cublasGemmEx. On Linux those symbols arrive transitively through torch's own
+  # link line, so vLLM never names cuBLAS anywhere in this file. The MSVC linker
+  # does no such thing and fails at the very last step:
+  #   q_gemm.cu.obj : error LNK2019: unresolved external symbol cublasHgemm
+  #   _C_stable_libtorch.pyd : fatal error LNK1120: 1 unresolved external
+  # CUDA::cublas comes from CMake's own CUDAToolkit package. Applied to both
+  # stable targets: only _C_stable_libtorch failed, but both compile
+  # libtorch_stable/torch_utils.h, so the second is one link away from the same
+  # failure and this costs nothing when the symbol is unused.
+  if(WIN32)
+    find_package(CUDAToolkit REQUIRED)
+    target_link_libraries(_C_stable_libtorch PRIVATE CUDA::cublas)
+  endif()
     if(COOPERATIVE_TOPK_ARCHS)
       target_compile_definitions(_C_stable_libtorch PRIVATE
         VLLM_ENABLE_COOPERATIVE_TOPK=1)
@@ -1450,6 +1513,22 @@ target_compile_definitions(_moe_C_stable_libtorch PRIVATE
 # Needed to use cuda/hip APIs from C-shim
 if(VLLM_GPU_LANG STREQUAL "CUDA")
   target_compile_definitions(_moe_C_stable_libtorch PRIVATE USE_CUDA)
+
+  # [edge-infer W2] Name cuBLAS explicitly on Windows. csrc/libtorch_stable/
+  # quantization/gptq/q_gemm.cu calls cublasHgemm and the allspark kernels call
+  # cublasGemmEx. On Linux those symbols arrive transitively through torch's own
+  # link line, so vLLM never names cuBLAS anywhere in this file. The MSVC linker
+  # does no such thing and fails at the very last step:
+  #   q_gemm.cu.obj : error LNK2019: unresolved external symbol cublasHgemm
+  #   _C_stable_libtorch.pyd : fatal error LNK1120: 1 unresolved external
+  # CUDA::cublas comes from CMake's own CUDAToolkit package. Applied to both
+  # stable targets: only _C_stable_libtorch failed, but both compile
+  # libtorch_stable/torch_utils.h, so the second is one link away from the same
+  # failure and this costs nothing when the symbol is unused.
+  if(WIN32)
+    find_package(CUDAToolkit REQUIRED)
+    target_link_libraries(_moe_C_stable_libtorch PRIVATE CUDA::cublas)
+  endif()
   # Needed by CUTLASS kernels
   target_compile_definitions(_moe_C_stable_libtorch PRIVATE
     CUTLASS_ENABLE_DIRECT_CUDA_DRIVER_CALL=1)
@@ -1573,13 +1652,14 @@ endif()
 
 # For CUDA we also build and ship some external projects.
 if (VLLM_GPU_LANG STREQUAL "CUDA")
-    include(cmake/external_projects/deepgemm.cmake)
+    if (VLLM_WIN_SKIP_CUTLASS)
+      add_custom_target(_deep_gemm_C)
+    else()
+      include(cmake/external_projects/deepgemm.cmake)
+    endif()
     include(cmake/external_projects/deepselect.cmake)
     include(cmake/external_projects/fmha_sm100.cmake)
     include(cmake/external_projects/flashmla.cmake)
-    include(cmake/external_projects/flashkda.cmake)
-    include(cmake/external_projects/qutlass.cmake)
-    include(cmake/external_projects/tml_fa4.cmake)
 
     # vllm-flash-attn should be last as it overwrites some CMake functions
     include(cmake/external_projects/vllm_flash_attn.cmake)

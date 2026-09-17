@@ -99,6 +99,26 @@ def is_metadata_only_build() -> bool:
 if sys.platform.startswith("darwin") and VLLM_TARGET_DEVICE != "cpu":
     logger.warning("VLLM_TARGET_DEVICE automatically set to `cpu` due to macOS")
     VLLM_TARGET_DEVICE = "cpu"
+elif sys.platform.startswith("win"):
+    # [edge-infer W2] Windows is an explicit branch, not a silent downgrade.
+    #
+    # The line this replaces set VLLM_TARGET_DEVICE = "empty", which produces a
+    # wheel with **no kernels** that nonetheless imports cleanly --
+    # Platform.import_kernels() only warns -- and then dies at the first custom
+    # op. A build that quietly produces nothing is worse than one that refuses,
+    # so an unset target here is an error rather than a default.
+    if os.getenv("VLLM_TARGET_DEVICE") is None:
+        raise RuntimeError(
+            "Building vLLM on Windows requires VLLM_TARGET_DEVICE to be set "
+            "explicitly (e.g. VLLM_TARGET_DEVICE=cuda). Refusing to fall back "
+            "to the 'empty' target, which yields a wheel with no kernels that "
+            "imports successfully and fails at the first rms_norm."
+        )
+    logger.warning(
+        "Building vLLM on Windows (target=%s). This is not an upstream-"
+        "supported configuration.",
+        VLLM_TARGET_DEVICE,
+    )
 elif not (sys.platform.startswith("linux") or sys.platform.startswith("darwin")):
     logger.warning(
         "vLLM only supports Linux platform (including WSL) and MacOS."
@@ -293,7 +313,15 @@ class cmake_build_ext(build_ext):
 
         # Pass the python executable to cmake so it can find an exact
         # match.
-        cmake_args += [f"-DVLLM_PYTHON_EXECUTABLE={sys.executable}"]
+        # [edge-infer W2] CMake parses backslashes as escapes, and
+        # find_python_from_executable is a *macro*, so its argument is spliced in
+        # textually -- quoting inside the macro cannot save it. A native Windows
+        # interpreter path such as C:\\Users\\... therefore fails configure with
+        # "Invalid character escape '\\U'". Hand CMake forward slashes, which it
+        # accepts on Windows and which are a no-op on POSIX.
+        cmake_args += [
+            "-DVLLM_PYTHON_EXECUTABLE={}".format(sys.executable.replace("\\", "/"))
+        ]
 
         # Pass the python path to cmake so it can reuse the build dependencies
         # on subsequent calls to python.
@@ -326,7 +354,13 @@ class cmake_build_ext(build_ext):
             build_tool = []
         # Make sure we use the nvcc from CUDA_HOME
         if _is_cuda() and CUDA_HOME is not None:
-            cmake_args += [f"-DCMAKE_CUDA_COMPILER={CUDA_HOME}/bin/nvcc"]
+            # [edge-infer W2] CMake requires the executable suffix on Windows;
+            # a bare ".../bin/nvcc" is rejected as "not a full path to an
+            # existing compiler tool". No-op elsewhere.
+            _nvcc = f"{CUDA_HOME}/bin/nvcc"
+            if sys.platform == "win32":
+                _nvcc += ".exe"
+            cmake_args += [f"-DCMAKE_CUDA_COMPILER={_nvcc}"]
         elif _is_hip() and ROCM_HOME is not None:
             cmake_args += [f"-DROCM_PATH={ROCM_HOME}"]
 
