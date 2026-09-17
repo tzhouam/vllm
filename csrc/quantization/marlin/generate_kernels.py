@@ -265,10 +265,21 @@ def generate_new_kernels():
                 ]
                 conditions = " && ".join(conditions)
 
-                if kernel_selector_str == FILE_HEAD_COMMENT:
-                    kernel_selector_str += f"if ({conditions})\n  kernel = "
-                else:
-                    kernel_selector_str += f"else if ({conditions})\n  kernel = "
+                # [edge-infer W2] Emit a FLAT chain, not if/else-if.
+                # An if/else-if chain of N branches is N levels of block nesting
+                # grammatically, and this generator emits 936 of them. MSVC caps
+                # nesting at 128 and fails the build with
+                #   fatal error C1061: compiler limit: blocks nested too deeply
+                # GCC has no such limit, which is why the nested form works on
+                # Linux. Guarding on `kernel == MarlinDefault` keeps first-match-
+                # wins exactly: `kernel` is initialised to MarlinDefault directly
+                # above the #include of kernel_selector.h at every include site,
+                # and no branch ever assigns MarlinDefault, so the guard is false
+                # for precisely the branches the `else` chain used to skip.
+                kernel_selector_str += (
+                    f"if (kernel == MarlinDefault && ({conditions}))\n"
+                    "  kernel = "
+                )
 
                 kernel_template2 = (
                     "Marlin<{{a_type_id}}, {{b_type_id}}, {{c_type_id}}, "
@@ -305,7 +316,7 @@ def generate_new_kernels():
 
     if not SUPPORT_FP8 and kernel_selector_str != FILE_HEAD_COMMENT:
         kernel_selector_str += (
-            "else if (a_type == vllm::kFE4M3fn)\n"
+            "if (kernel == MarlinDefault && a_type == vllm::kFE4M3fn)\n"
             "  STD_TORCH_CHECK(false, "
             '"marlin kernel with fp8 activation is not built.");'
         )

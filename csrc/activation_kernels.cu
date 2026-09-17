@@ -1,3 +1,8 @@
+// [edge-infer W2] MSVC hides M_SQRT2 and friends unless this is defined
+// before <cmath>. No effect on POSIX libm headers.
+#ifdef _WIN32
+  #define _USE_MATH_DEFINES
+#endif
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <torch/csrc/stable/tensor.h>

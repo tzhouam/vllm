@@ -38,9 +38,16 @@ struct quant_type_max<torch::headeronly::Float8_e4m3fnuz> {
   }
 };
 
-template <typename T>
-MAYBE_HOST_DEVICE static constexpr T quant_type_max_v =
-    quant_type_max<T>::val();
+// [edge-infer W2] quant_type_max_v was a __device__ variable template. nvcc on
+// Windows forbids that outright: "A __device__ variable template cannot have a
+// const qualified type on Windows". Dropping __host__ was tried (nvcc rejects
+// it on variable templates) and so was dropping both (then it is undefined in
+// device code) -- the construct itself is the problem, not its attributes.
+//
+// Call sites now use quant_type_max<T>::val() directly, which is what the
+// variable wrapped and is already __host__ __device__ constexpr. Same value,
+// no variable template, and valid on every platform -- so this is a
+// simplification rather than a Windows special case.
 
 template <typename T,
           typename = std::enable_if_t<
@@ -49,7 +56,7 @@ template <typename T,
               std::is_same_v<T, int8_t>>>
 struct min_scaling_factor {
   C10_DEVICE C10_ALWAYS_INLINE static float val() {
-    return 1.0f / (quant_type_max_v<T> * 512.0f);
+    return 1.0f / (quant_type_max<T>::val() * 512.0f);
   }
 };
 

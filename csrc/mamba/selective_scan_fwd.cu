@@ -406,13 +406,17 @@ void selective_scan_fwd_launch(SSMParamsBase &params, cudaStream_t stream) {
                 dim3 grid(params.batch, params.dim / kNRows);
                 auto kernel = &selective_scan_fwd_kernel<Ktraits>;
                 if (kSmemSize >= 48 * 1024) {
-#ifdef USE_ROCM
-                    STD_CUDA_CHECK(hipFuncSetAttribute(
-                        reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-#else
+                    // [edge-infer W2] The #ifdef/#else/#endif that stood here sat
+                    // INSIDE the argument list of the BOOL_SWITCH macro invocation
+                    // that begins at the top of this function. Preprocessor
+                    // directives inside macro arguments are undefined behaviour in
+                    // C++: GCC accepts them, MSVC's conformant preprocessor (which
+                    // CCCL requires, so it is not optional here) rejects them with
+                    // '"#" not expected here'. Took the !USE_ROCM branch directly.
+                    // Build-specific, not an upstream fix -- upstream should hoist
+                    // the condition out of the macro call, as with error #8.
                     STD_CUDA_CHECK(cudaFuncSetAttribute(
                         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, kSmemSize));
-#endif
                 }
                 kernel<<<grid, Ktraits::kNThreads, kSmemSize, stream>>>(params);
                 STD_CUDA_KERNEL_LAUNCH_CHECK();

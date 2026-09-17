@@ -979,7 +979,12 @@ namespace hist4096 = topk_histogram_4096;
     }                                   \
   }
 
-#define FLASHINFER_INLINE inline __attribute__((always_inline)) __device__
+// [edge-infer W2] __attribute__((always_inline)) is a GCC/Clang extension that
+// MSVC does not have, so nvcc forwarding it to cl.exe makes every use of this
+// macro a syntax error. CUDA's own __forceinline__ is the portable spelling of
+// exactly this intent: it expands to __inline__ __attribute__((always_inline))
+// on GCC and to __forceinline on MSVC. Same semantics everywhere.
+#define FLASHINFER_INLINE __forceinline__ __device__
 
 template <typename T, size_t N>
 struct vec_t {

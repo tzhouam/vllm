@@ -682,7 +682,11 @@ void topkGatingSoftplusSqrtLauncherHelper(
         &topkGatingSoftplusSqrt<VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG,
                                 WARP_SIZE_PARAM, USE_HASH, IndType, HashIndType,
                                 InputType>;
-#ifndef USE_ROCM
+    // [edge-infer W2] The #ifndef USE_ROCM / #else / #endif that stood here sat
+    // INSIDE the argument list of the DISPATCH_HASH(...) macro invocation that
+    // opens above. Same defect as errors #8 and #15 -- MSVC's conformant
+    // preprocessor rejects directives in macro arguments. Took the !USE_ROCM
+    // branch directly. Found by scanning rather than by a build cycle.
     cudaLaunchConfig_t config = {};
     config.gridDim = num_blocks;
     config.blockDim = block_dim;

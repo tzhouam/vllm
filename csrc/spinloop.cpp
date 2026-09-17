@@ -5,6 +5,33 @@ extern "C" {
 #include <stdbool.h>
 #include <time.h>
 
+// [edge-infer W2] clock_gettime/CLOCK_MONOTONIC are POSIX. MSVC ships
+// struct timespec (C11) but neither the clock ids nor the function, so the
+// two call sites below need a shim rather than a rewrite. QueryPerformance-
+// Counter is the monotonic source Windows offers, and its frequency is fixed
+// at boot, so the seconds/nanoseconds split is exact enough for a timeout.
+//
+// Note the GCC-only guard on the x86 block above: __i386__/__x86_64__ are not
+// defined by MSVC (it uses _M_X64), so the MONITORX/MWAITX path compiles out
+// here and the loop falls back to plain spinning. That is a capability the
+// Windows build simply does not have, not a bug introduced by this shim.
+#ifdef _WIN32
+  #include <windows.h>
+  #ifndef CLOCK_MONOTONIC
+    #define CLOCK_MONOTONIC 1
+  #endif
+static int clock_gettime(int /*clk_id*/, struct timespec* tp) {
+  static LARGE_INTEGER freq = {0};
+  if (freq.QuadPart == 0 && !QueryPerformanceFrequency(&freq)) return -1;
+  LARGE_INTEGER now;
+  if (!QueryPerformanceCounter(&now)) return -1;
+  tp->tv_sec = (time_t)(now.QuadPart / freq.QuadPart);
+  tp->tv_nsec =
+      (long)(((now.QuadPart % freq.QuadPart) * 1000000000LL) / freq.QuadPart);
+  return 0;
+}
+#endif
+
 #if defined(__i386__) || defined(__x86_64__)
   #include <cpuid.h>
   #include <x86intrin.h>

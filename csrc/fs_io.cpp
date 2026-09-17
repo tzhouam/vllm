@@ -5,7 +5,31 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <unistd.h>
+
+// [edge-infer W2] <unistd.h> is POSIX. MSVC provides open/read/write/close/
+// unlink from <io.h> (as deprecated aliases for the _-prefixed CRT names).
+//
+// O_BINARY is not cosmetic here: without it the CRT translates CRLF on every
+// read and write, which would silently corrupt the blocks this file exists to
+// move. It is defined to 0 on POSIX so the call sites below stay identical.
+//
+// O_DIRECT needs no handling -- the guard below already degrades it to 0, so
+// Windows simply gets buffered I/O rather than a wrong answer.
+#ifdef _WIN32
+  #include <io.h>
+  #include <BaseTsd.h>
+typedef SSIZE_T ssize_t;  // POSIX type, absent from MSVC
+  #ifndef O_BINARY
+    #define O_BINARY _O_BINARY
+  #endif
+  #ifndef F_OK
+    // _access() takes the same mode values; 0 is the existence check.
+    #define F_OK 0
+  #endif
+#else
+  #include <unistd.h>
+  #define O_BINARY 0
+#endif
 
 #include <filesystem>
 #include <string>
@@ -49,7 +73,8 @@ inline int _store_block(const char* tmp_path, const char* dest_path,
 
   const int o_direct_flag = use_o_direct ? kODirectFlag : 0;
   const int fd = open(
-      tmp_path, O_CREAT | O_EXCL | O_WRONLY | O_TRUNC | o_direct_flag, 0644);
+      tmp_path, O_CREAT | O_EXCL | O_WRONLY | O_TRUNC | O_BINARY | o_direct_flag,
+      0644);
   if (fd < 0) {
     return errno;
   }
@@ -87,7 +112,7 @@ inline int _store_block(const char* tmp_path, const char* dest_path,
 inline int _load_block(const char* source_path, char* dst, size_t size,
                        bool use_o_direct) {
   const int o_direct_flag = use_o_direct ? kODirectFlag : 0;
-  const int fd = open(source_path, O_RDONLY | o_direct_flag, 0);
+  const int fd = open(source_path, O_RDONLY | O_BINARY | o_direct_flag, 0);
   if (fd < 0) {
     return errno;
   }

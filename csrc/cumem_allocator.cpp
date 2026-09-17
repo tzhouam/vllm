@@ -78,6 +78,15 @@ extern "C" {
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+// [edge-infer W2] ssize_t is POSIX and absent from MSVC. Windows spells the
+// same thing SSIZE_T in <BaseTsd.h>; without this the file produces ~18
+// cascading C2065/C2061 errors that all trace back to this one missing type.
+#ifdef _WIN32
+  #include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
+
+
 #include <sys/types.h>
 
 char error_msg[10240];  // 10KB buffer to store error messages

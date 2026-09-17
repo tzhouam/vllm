@@ -8,6 +8,8 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <cstdint>
+// [edge-infer W2] for FLT_MAX -- see the note at its use below.
+#include <cfloat>
 
 namespace vllm {
 namespace topk_histogram_4096 {
@@ -516,7 +518,10 @@ __device__ void histogram_4096_topk(const float* __restrict__ scores,
     const auto warp_id = tx / kWarpSize;
     const auto lane1 = lane_id + kWarpSize;
     const auto warp1 = warp_id + kWarpSize;
-    const auto invalid = Tie{0xFFFFFFFF, -__FLT_MAX__};
+    // [edge-infer W2] __FLT_MAX__ is a GCC/Clang predefined macro; MSVC does
+    // not define it. FLT_MAX from <cfloat> is the standard C++ spelling of the
+    // same value and works on every toolchain.
+    const auto invalid = Tie{0xFFFFFFFF, -FLT_MAX};
     const auto tie0 = smem->tie_buffer[lane_id];
     const auto tie1 = lane1 < num_ties ? smem->tie_buffer[lane1] : invalid;
     if (warp_id < num_ties) {

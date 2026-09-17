@@ -11,6 +11,20 @@
 
 namespace vllm {
 
+// [edge-infer W2] std::isinf is host-only under MSVC. <cmath> declares isinf as
+// a function template in std:: *and* in the global namespace; nvcc then binds
+// that __host__ template in preference to CUDA's __device__ isinf, so every use
+// inside a __global__ function fails with "calling a __host__ function from a
+// __global__ function is not allowed". libstdc++ does not have this problem,
+// which is why the bare call works on Linux.
+//
+// Comparing against INFINITY is exactly equivalent -- true for +inf and -inf,
+// false for NaN (all comparisons with NaN are false), same as std::isinf -- and
+// is unambiguous on both toolchains.
+__device__ __forceinline__ bool is_inf_f32(float x) {
+  return x == INFINITY || x == -INFINITY;
+}
+
 // Implements section 2.2 of https://www.arxiv.org/pdf/2501.01005
 // can be used to combine partial attention results (in the split-KV case)
 template <typename scalar_t, typename output_t, const uint NUM_THREADS,
@@ -99,8 +113,8 @@ __global__ void merge_attn_states_kernel(
                            token_idx * prefix_lse_token_stride];
   float s_lse = suffix_lse[head_idx * suffix_lse_head_stride +
                            token_idx * suffix_lse_token_stride];
-  p_lse = std::isinf(p_lse) ? -std::numeric_limits<float>::infinity() : p_lse;
-  s_lse = std::isinf(s_lse) ? -std::numeric_limits<float>::infinity() : s_lse;
+  p_lse = is_inf_f32(p_lse) ? -std::numeric_limits<float>::infinity() : p_lse;
+  s_lse = is_inf_f32(s_lse) ? -std::numeric_limits<float>::infinity() : s_lse;
 
   const float max_lse = fmaxf(p_lse, s_lse);
 
@@ -112,7 +126,7 @@ __global__ void merge_attn_states_kernel(
      prefix_output (expected to be all zeros) and prefix_lse (-inf) to fix
      this problem.
   */
-  if (std::isinf(max_lse)) {
+  if (is_inf_f32(max_lse)) {
     if (pack_offset < head_size) {
       input_pack_t p_out_pack = reinterpret_cast<const input_pack_t*>(
           prefix_head_ptr)[pack_offset / pack_size];

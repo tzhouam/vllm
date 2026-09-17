@@ -3,10 +3,21 @@
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
+#ifdef _MSC_VER
+  #include <bit>
+#endif
 
+// [edge-infer W2] __builtin_clz is a GCC/Clang builtin; MSVC has no such
+// identifier. std::countl_zero (C++20, <bit>) is the standard spelling and is
+// constexpr, which this function needs. Same result on every compiler, so the
+// GCC path is kept only for toolchains predating C++20 support here.
 inline constexpr uint32_t next_pow_2(uint32_t const num) {
   if (num <= 1) return num;
+#ifdef _MSC_VER
+  return 1u << (CHAR_BIT * sizeof(num) - std::countl_zero(num - 1));
+#else
   return 1 << (CHAR_BIT * sizeof(num) - __builtin_clz(num - 1));
+#endif
 }
 
 template <typename A, typename B>

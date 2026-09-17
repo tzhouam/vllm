@@ -1,5 +1,15 @@
 #include "torch_utils.h"
 
+// [edge-infer W2] __int128_t/__int64_t are GCC extensions; MSVC has no
+// 128-bit integer type at all. Here they are used purely as *aligned storage*
+// for shared memory -- declaration, pointer arithmetic and cp_async4 (a 16-byte
+// copy) -- with no 128-bit arithmetic anywhere, so any 16-byte aligned POD is
+// equivalent. CUDA's int4 is exactly 16 bytes and 16-byte aligned.
+#ifdef _MSC_VER
+typedef int4 __int128_t;
+typedef long long __int64_t;
+#endif
+
 #include <cmath>
 
 #include "core/utils.hpp"
