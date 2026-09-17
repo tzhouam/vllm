@@ -276,6 +276,17 @@ def find_loaded_library(lib_name: str) -> str | None:
     # {lib_name}-<hash>.so[.*], and /proc/self/maps is ordered by mapping
     # address rather than load order, so a substring hit is a
     # nondeterministic hijack.
+    # [edge-infer W0 windows patch] find_loaded_library: /proc is Linux-only. On Windows an
+    # already-imported extension module's __file__ IS the loaded path.
+    if sys.platform == "win32":
+        for _mod in list(sys.modules.values()):
+            _f = getattr(_mod, "__file__", None)
+            if not _f:
+                continue
+            _base = _f.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
+            if _base.startswith((f"{lib_name}.", f"{lib_name}-")):
+                return _f
+        return None
     with open("/proc/self/maps") as f:
         for line in f:
             start = line.find("/")

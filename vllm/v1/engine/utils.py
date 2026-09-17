@@ -3,6 +3,7 @@
 
 import contextlib
 import os
+import sys
 import threading
 import weakref
 from collections.abc import Callable, Iterator, Sequence
@@ -1379,23 +1380,45 @@ def wait_for_engine_startup(
         and not parallel_config.data_parallel_external_lb
     )
 
+    # [edge-infer W0 windows patch] sentinel-poll: Process.sentinel is a pipe fd on POSIX but a
+    # process HANDLE on Windows -- not a socket, so zmq_poll rejects the whole
+    # poll set. Skip registration there; liveness is checked below instead.
+    _win_sentinels = sys.platform == "win32"
     # 1. Engine processes
-    if isinstance(launch.engine_manager, CoreEngineProcManager):
+    if not _win_sentinels and isinstance(launch.engine_manager, CoreEngineProcManager):
         for sentinel in launch.engine_manager.sentinels():
             poller.register(sentinel, zmq.POLLIN)
     # 2. DP Coordinator process, if present
     coord_process = launch.coordinator.proc if launch.coordinator else None
-    if coord_process is not None:
+    if coord_process is not None and not _win_sentinels:
         poller.register(coord_process.sentinel, zmq.POLLIN)
     # 3. Watched frontend processes, if any
     frontend_process_by_fd: dict[int, FrontendProcess] = {}
     for proc in launch.watched_frontend_processes:
         fd = proc.sentinel if isinstance(proc.sentinel, int) else proc.sentinel.fileno()
         frontend_process_by_fd[fd] = proc
-        poller.register(fd, zmq.POLLIN)
+        if not _win_sentinels:
+            poller.register(fd, zmq.POLLIN)
 
     while any(conn_pending) or any(start_pending):
-        events = poller.poll(STARTUP_POLL_PERIOD_MS)
+        events = poller.poll(
+            500 if _win_sentinels else STARTUP_POLL_PERIOD_MS
+        )
+        if _win_sentinels and not events:
+            # [edge-infer W0 windows patch] the sentinels above would have reported this on POSIX.
+            _dead = {}
+            if isinstance(launch.engine_manager, CoreEngineProcManager):
+                _dead.update(launch.engine_manager.finished_procs())
+            if coord_process is not None and coord_process.exitcode is not None:
+                _dead[coord_process.name] = coord_process.exitcode
+            for _p in frontend_process_by_fd.values():
+                if _p.exitcode is not None:
+                    _dead[_p.name] = _p.exitcode
+            if _dead:
+                raise RuntimeError(
+                    "Engine core initialization failed. See root cause above. "
+                    f"Failed proc(s): {_dead}"
+                )
         if not events:
             if any(conn_pending):
                 logger.debug(

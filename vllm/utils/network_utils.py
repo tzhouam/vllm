@@ -173,6 +173,16 @@ def get_tcp_uri(ip: str, port: int) -> str:
 
 
 def get_open_zmq_ipc_path() -> str:
+    # [edge-infer W0 windows patch] ipc: libzmq on Windows has no ipc:// transport
+    # (measured: zmq.has("ipc") is False and bind raises "Protocol not
+    # supported"). Loopback TCP is the only local option there. NOTE: this
+    # drops the filesystem permissions a Unix socket carries -- a loopback
+    # port is reachable by any local user -- so it is a fallback, not a
+    # preference, and it is conditional on ipc being truly unavailable.
+    import zmq as _zmq
+
+    if not _zmq.has("ipc"):
+        return get_tcp_uri("127.0.0.1", get_open_port())
     base_rpc_path = envs.VLLM_RPC_BASE_PATH
     return f"ipc://{base_rpc_path}/{uuid4()}"
 

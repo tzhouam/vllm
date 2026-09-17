@@ -23,7 +23,13 @@ from typing import (
 )
 
 import torch
-import uvloop
+# [edge-infer W0 windows patch] uvloop: no Windows wheels; bind lazily so importing this
+# module does not require it. The only use is in an API-server entry point.
+def __getattr__(_name):
+    if _name == 'uvloop':
+        import uvloop as _u
+        return _u
+    raise AttributeError(_name)
 from torch.autograd.profiler import record_function
 
 import vllm.envs as envs
