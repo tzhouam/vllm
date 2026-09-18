@@ -345,8 +345,12 @@ void quant_impl(void* output, void* output_scale, void* input,
 
 constexpr auto HALF = torch::headeronly::ScalarType::Half;
 constexpr auto BF16 = torch::headeronly::ScalarType::BFloat16;
-constexpr auto FLOAT = torch::headeronly::ScalarType::Float;
-constexpr auto INT = torch::headeronly::ScalarType::Int;
+// [edge-infer W7] were FLOAT / INT. <windef.h> (reached through <BaseTsd.h>
+// in the Windows compat pre-include) typedefs FLOAT and INT at global scope, so
+// nvcc reports '"FLOAT" has already been declared in the current scope'. Renamed;
+// same values, same uses.
+constexpr auto FLOAT_ST = torch::headeronly::ScalarType::Float;
+constexpr auto INT_ST = torch::headeronly::ScalarType::Int;
 constexpr auto UINT8 = torch::headeronly::ScalarType::Byte;
 
 // Common validation for fp4 experts quantization entry points.
@@ -373,13 +377,13 @@ static void validate_fp4_experts_quant_inputs(
   STD_TORCH_CHECK(output_scale_offset_by_experts.dim() == 1);
 
   STD_TORCH_CHECK(input.scalar_type() == HALF || input.scalar_type() == BF16);
-  STD_TORCH_CHECK(input_global_scale.scalar_type() == FLOAT);
-  STD_TORCH_CHECK(input_offset_by_experts.scalar_type() == INT);
-  STD_TORCH_CHECK(output_scale_offset_by_experts.scalar_type() == INT);
+  STD_TORCH_CHECK(input_global_scale.scalar_type() == FLOAT_ST);
+  STD_TORCH_CHECK(input_offset_by_experts.scalar_type() == INT_ST);
+  STD_TORCH_CHECK(output_scale_offset_by_experts.scalar_type() == INT_ST);
   // output is uint8 (two nvfp4 values are packed into one uint8)
   // output_scale is int32 (four fp8 values are packed into one int32)
   STD_TORCH_CHECK(output.scalar_type() == UINT8);
-  STD_TORCH_CHECK(output_scale.scalar_type() == INT);
+  STD_TORCH_CHECK(output_scale.scalar_type() == INT_ST);
 
   const int BLOCK_SIZE = 16;
   STD_TORCH_CHECK(k % BLOCK_SIZE == 0, "k must be a multiple of 16");
