@@ -1259,14 +1259,26 @@ void situ_and_mul_quant(torch::stable::Tensor& out,    // [..., d]  (fp8)
                     "situ_and_mul_quant: scale shape must be "
                     "[num_tokens, d/group_size]");
     dim3 grid(GRID_DIM);
+    // [edge-infer W6] The ROCm guard used to sit as `#ifndef USE_ROCM` INSIDE
+    // the VLLM_STABLE_DISPATCH_* argument list. A preprocessor directive
+    // inside a macro argument list is undefined behaviour that MSVC's
+    // conformant preprocessor (C5101) and nvcc's EDG front end ("#" not
+    // expected here) both reject; GCC tolerates it. Same defect class as the
+    // W2 shims. Hoisted to a constexpr flag; the pipelined kernel template is
+    // defined on both targets, so `if constexpr` keeps the HIP path identical.
+#ifndef USE_ROCM
+    constexpr bool kSituPipelinedPath = true;
+#else
+    constexpr bool kSituPipelinedPath = false;
+#endif
     VLLM_STABLE_DISPATCH_FLOATING_TYPES(
         input.scalar_type(), "situ_and_mul_quant_group_kernel", [&] {
           VLLM_STABLE_DISPATCH_FP8_TYPES(
               out.scalar_type(), "situ_and_mul_quant_group_kernel_fp8", [&] {
-#ifndef USE_ROCM
                 // The pipelined kernel's float2-per-lane geometry assumes a
                 // 32-lane warp (GROUP_SIZE == 4 * WARP_SIZE); on HIP (64-lane)
                 // fall back to the WARP_SIZE-generic scalar kernel.
+                if constexpr (kSituPipelinedPath) {
                 constexpr int THREADS = 256;
                 constexpr int SITU_D = 3072;  // Kimi-K3 fused w2 input dim
                 if constexpr (sizeof(scalar_t) == 2) {
@@ -1289,7 +1301,7 @@ void situ_and_mul_quant(torch::stable::Tensor& out,    // [..., d]  (fp8)
                     return;
                   }
                 }
-#endif
+                }
                 const int num_warps = std::min(num_groups, 1024 / WARP_SIZE);
                 dim3 block(num_warps * WARP_SIZE);
                 vllm::situ_and_mul_quant_group_scalar_kernel<scalar_t, fp8_t,
