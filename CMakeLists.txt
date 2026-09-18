@@ -1655,7 +1655,19 @@ if (VLLM_GPU_LANG STREQUAL "CUDA")
     if (VLLM_WIN_SKIP_CUTLASS)
       add_custom_target(_deep_gemm_C)
     else()
-      include(cmake/external_projects/deepgemm.cmake)
+      # [edge-infer W7] DeepGEMM stays out on Windows even with the groups ON.
+      # Its _C is a pybind11 module built by tools/build_deepgemm_C.py with a
+      # hard-coded g++ command, and the C++ JIT runtime behind it is POSIX:
+      # csrc/jit/handle.hpp dlopen()s libcuda.so.1, csrc/utils/system.hpp uses
+      # <unistd.h> and popen() to drive nvcc. That is a port of DeepGEMM, not a
+      # build fix. vLLM already gates its use at runtime (is_deep_gemm_supported
+      # -> has_deep_gemm()), so the module's absence degrades to "not used".
+      if(WIN32)
+        message(STATUS "[edge-infer W7] Windows: DeepGEMM _C not built (POSIX-only build script and JIT runtime)")
+        add_custom_target(_deep_gemm_C)
+      else()
+        include(cmake/external_projects/deepgemm.cmake)
+      endif()
     endif()
     include(cmake/external_projects/deepselect.cmake)
     include(cmake/external_projects/fmha_sm100.cmake)
