@@ -351,7 +351,7 @@ constexpr auto BF16 = torch::headeronly::ScalarType::BFloat16;
 // same values, same uses.
 constexpr auto FLOAT_ST = torch::headeronly::ScalarType::Float;
 constexpr auto INT_ST = torch::headeronly::ScalarType::Int;
-constexpr auto UINT8 = torch::headeronly::ScalarType::Byte;
+constexpr auto UINT8_ST = torch::headeronly::ScalarType::Byte;
 
 // Common validation for fp4 experts quantization entry points.
 static void validate_fp4_experts_quant_inputs(
@@ -382,7 +382,7 @@ static void validate_fp4_experts_quant_inputs(
   STD_TORCH_CHECK(output_scale_offset_by_experts.scalar_type() == INT_ST);
   // output is uint8 (two nvfp4 values are packed into one uint8)
   // output_scale is int32 (four fp8 values are packed into one int32)
-  STD_TORCH_CHECK(output.scalar_type() == UINT8);
+  STD_TORCH_CHECK(output.scalar_type() == UINT8_ST);
   STD_TORCH_CHECK(output_scale.scalar_type() == INT_ST);
 
   const int BLOCK_SIZE = 16;

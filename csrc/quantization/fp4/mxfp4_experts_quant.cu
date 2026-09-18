@@ -336,7 +336,7 @@ constexpr auto HALF = torch::headeronly::ScalarType::Half;
 constexpr auto BF16 = torch::headeronly::ScalarType::BFloat16;
 // [edge-infer W7] was INT: a <windef.h> global typedef on Windows (see nvfp4_experts_quant.cu).
 constexpr auto INT_ST = torch::headeronly::ScalarType::Int;
-constexpr auto UINT8 = torch::headeronly::ScalarType::Byte;
+constexpr auto UINT8_ST = torch::headeronly::ScalarType::Byte;
 
 static constexpr int MXFP4_BLOCK_SIZE = 32;
 
@@ -364,7 +364,7 @@ static void validate_mxfp4_experts_quant_inputs(
   STD_TORCH_CHECK(output_scale_offset_by_experts.scalar_type() == INT_ST);
   // output is uint8 (two mxfp4 values packed into one uint8)
   // output_scale is int32 (four E8M0 values packed into one int32)
-  STD_TORCH_CHECK(output.scalar_type() == UINT8);
+  STD_TORCH_CHECK(output.scalar_type() == UINT8_ST);
   STD_TORCH_CHECK(output_scale.scalar_type() == INT_ST);
 
   STD_TORCH_CHECK(k % MXFP4_BLOCK_SIZE == 0, "k must be a multiple of 32");
