@@ -257,8 +257,20 @@ async def serve_http(
     async def dummy_shutdown() -> None:
         pass
 
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    # [edge-infer W8 windows patch] signal-handler: asyncio's add_signal_handler is
+    # Unix-only; on Windows every loop raises NotImplementedError and the API
+    # server died here right after the engine came up (measured, serving e2e).
+    # Fall back to plain signal.signal, hopping back onto the loop thread.
+    try:
+        loop.add_signal_handler(signal.SIGINT, signal_handler)
+        loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    except NotImplementedError:
+
+        def _sync_signal_handler(signum, frame) -> None:
+            loop.call_soon_threadsafe(signal_handler)
+
+        signal.signal(signal.SIGINT, _sync_signal_handler)
+        signal.signal(signal.SIGTERM, _sync_signal_handler)
 
     async def handle_shutdown() -> None:
         await shutdown_event.wait()
