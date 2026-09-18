@@ -72,6 +72,14 @@ if(FLASH_KDA_ARCHS)
   target_compile_options(_flashkda_C PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:-UPy_LIMITED_API --expt-relaxed-constexpr --expt-extended-lambda --use_fast_math -O3>
     $<$<COMPILE_LANGUAGE:CXX>:-UPy_LIMITED_API>)
+  # [edge-infer W7] Windows: with Py_LIMITED_API undefined above, pyconfig.h
+  # adds `#pragma comment(lib, "python312.lib")` to every object, but the link
+  # line only carries the full path of python3.lib (from Python::SABIModule), so
+  # link.exe has no directory to find python312.lib in: LNK1104. Give it the
+  # interpreter's libs directory. No effect off Windows.
+  if(WIN32 AND Python_LIBRARY_DIRS)
+    target_link_directories(_flashkda_C PRIVATE ${Python_LIBRARY_DIRS})
+  endif()
 else()
   message(STATUS
     "FlashKDA will not compile: CUDA >=12.0 and a supported architecture "
