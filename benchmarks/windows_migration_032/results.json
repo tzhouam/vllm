@@ -1,0 +1,89 @@
+{
+  "python_syntax_files": [
+    "csrc/quantization/marlin/generate_kernels.py",
+    "setup.py",
+    "vllm/entrypoints/launchers/launcher.py",
+    "vllm/utils/network_utils.py",
+    "vllm/utils/system_utils.py",
+    "vllm/v1/engine/utils.py",
+    "vllm/v1/utils.py",
+    "vllm/v1/worker/gpu/sample/states.py"
+  ],
+  "checks": [
+    {
+      "command": [
+        ".venv/bin/pre-commit",
+        "run",
+        "ruff-check",
+        "--from-ref",
+        "v0.32.0",
+        "--to-ref",
+        "HEAD"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        ".venv/bin/pre-commit",
+        "run",
+        "ruff-format",
+        "--from-ref",
+        "v0.32.0",
+        "--to-ref",
+        "HEAD"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        ".venv/bin/pre-commit",
+        "run",
+        "clang-format",
+        "--from-ref",
+        "v0.32.0",
+        "--to-ref",
+        "HEAD"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        ".venv/bin/pre-commit",
+        "run",
+        "check-spdx-header",
+        "--from-ref",
+        "v0.32.0",
+        "--to-ref",
+        "HEAD"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        ".venv/bin/pre-commit",
+        "run",
+        "check-root-lazy-imports",
+        "--from-ref",
+        "v0.32.0",
+        "--to-ref",
+        "HEAD"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        ".venv/bin/pre-commit",
+        "run",
+        "check-filenames",
+        "--from-ref",
+        "v0.32.0",
+        "--to-ref",
+        "HEAD"
+      ],
+      "returncode": 0
+    }
+  ],
+  "macro_scan_returncode": 0,
+  "full_precommit": "Blocked: nodeenv download from nodejs.org repeatedly raises IncompleteRead before hooks run. Selected source hooks run separately.",
+  "native_windows_build": "not run; installed 0.29 environment unchanged"
+}

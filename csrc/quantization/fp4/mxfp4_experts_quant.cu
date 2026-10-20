@@ -334,7 +334,8 @@ void mxfp4_quant_impl(void* output, void* output_scale, void* input,
 
 constexpr auto HALF = torch::headeronly::ScalarType::Half;
 constexpr auto BF16 = torch::headeronly::ScalarType::BFloat16;
-// [edge-infer W7] was INT: a <windef.h> global typedef on Windows (see nvfp4_experts_quant.cu).
+// [edge-infer W7] was INT: a <windef.h> global typedef on Windows (see
+// nvfp4_experts_quant.cu).
 constexpr auto INT_ST = torch::headeronly::ScalarType::Int;
 constexpr auto UINT8_ST = torch::headeronly::ScalarType::Byte;
 

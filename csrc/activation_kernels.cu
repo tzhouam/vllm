@@ -1279,28 +1279,28 @@ void situ_and_mul_quant(torch::stable::Tensor& out,    // [..., d]  (fp8)
                 // 32-lane warp (GROUP_SIZE == 4 * WARP_SIZE); on HIP (64-lane)
                 // fall back to the WARP_SIZE-generic scalar kernel.
                 if constexpr (kSituPipelinedPath) {
-                constexpr int THREADS = 256;
-                constexpr int SITU_D = 3072;  // Kimi-K3 fused w2 input dim
-                if constexpr (sizeof(scalar_t) == 2) {
-                  if (d == SITU_D && (float)beta == vllm::SITU_BETA &&
-                      (float)linear_beta == vllm::SITU_LINEAR_BETA) {
-                    constexpr int D = SITU_D;
-                    constexpr int GROUP_STAGES = 4;
-                    constexpr int NUM_WARPS = THREADS / 32;
-                    constexpr int STAGE_ELTS = 2 * 128;
-                    dim3 block(THREADS);
-                    size_t smem_bytes = (size_t)NUM_WARPS * GROUP_STAGES *
-                                        STAGE_ELTS * sizeof(scalar_t);
-                    vllm::situ_and_mul_quant_group_pipelined_kernel<
-                        scalar_t, fp8_t, THREADS, GROUP_STAGES, 128, GRID_DIM,
-                        D><<<grid, block, smem_bytes, stream>>>(
-                        out.mutable_data_ptr<fp8_t>(),
-                        scale.mutable_data_ptr<float>(),
-                        input.const_data_ptr<scalar_t>(), num_tokens,
-                        num_valid_tokens_ptr, topk);
-                    return;
+                  constexpr int THREADS = 256;
+                  constexpr int SITU_D = 3072;  // Kimi-K3 fused w2 input dim
+                  if constexpr (sizeof(scalar_t) == 2) {
+                    if (d == SITU_D && (float)beta == vllm::SITU_BETA &&
+                        (float)linear_beta == vllm::SITU_LINEAR_BETA) {
+                      constexpr int D = SITU_D;
+                      constexpr int GROUP_STAGES = 4;
+                      constexpr int NUM_WARPS = THREADS / 32;
+                      constexpr int STAGE_ELTS = 2 * 128;
+                      dim3 block(THREADS);
+                      size_t smem_bytes = (size_t)NUM_WARPS * GROUP_STAGES *
+                                          STAGE_ELTS * sizeof(scalar_t);
+                      vllm::situ_and_mul_quant_group_pipelined_kernel<
+                          scalar_t, fp8_t, THREADS, GROUP_STAGES, 128, GRID_DIM,
+                          D><<<grid, block, smem_bytes, stream>>>(
+                          out.mutable_data_ptr<fp8_t>(),
+                          scale.mutable_data_ptr<float>(),
+                          input.const_data_ptr<scalar_t>(), num_tokens,
+                          num_valid_tokens_ptr, topk);
+                      return;
+                    }
                   }
-                }
                 }
                 const int num_warps = std::min(num_groups, 1024 / WARP_SIZE);
                 dim3 block(num_warps * WARP_SIZE);

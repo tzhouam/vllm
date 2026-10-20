@@ -645,18 +645,6 @@ struct TopkConstants {
 };
 }  // namespace detail
 
-#define DISPATCH_HASH(use_hash, USE_HASH, ...)                                 \
-  if (use_hash) {                                                              \
-    const bool USE_HASH = true;                                                \
-    static_assert(USE_HASH == true, "USE_HASH must be compile-time constant"); \
-    __VA_ARGS__                                                                \
-  } else {                                                                     \
-    const bool USE_HASH = false;                                               \
-    static_assert(USE_HASH == false,                                           \
-                  "USE_HASH must be compile-time constant");                   \
-    __VA_ARGS__                                                                \
-  }
-
 template <int EXPERTS, int WARPS_PER_TB, int WARP_SIZE_PARAM,
           int MAX_BYTES_PER_LDG, typename IndType, typename HashIndType,
           typename InputType>
@@ -677,16 +665,12 @@ void topkGatingSoftplusSqrtLauncherHelper(
   const int num_warps = (num_rows + ROWS_PER_WARP - 1) / ROWS_PER_WARP;
   const int num_blocks = (num_warps + WARPS_PER_TB - 1) / WARPS_PER_TB;
   dim3 block_dim(WARP_SIZE_PARAM, WARPS_PER_TB);
-  DISPATCH_HASH(use_hash, USE_HASH, {
+  auto launch = [&]<bool USE_HASH>() {
     auto* kernel =
         &topkGatingSoftplusSqrt<VPT, EXPERTS, WARPS_PER_TB, BYTES_PER_LDG,
                                 WARP_SIZE_PARAM, USE_HASH, IndType, HashIndType,
                                 InputType>;
-    // [edge-infer W2] The #ifndef USE_ROCM / #else / #endif that stood here sat
-    // INSIDE the argument list of the DISPATCH_HASH(...) macro invocation that
-    // opens above. Same defect as errors #8 and #15 -- MSVC's conformant
-    // preprocessor rejects directives in macro arguments. Took the !USE_ROCM
-    // branch directly. Found by scanning rather than by a build cycle.
+#ifndef USE_ROCM
     cudaLaunchConfig_t config = {};
     config.gridDim = num_blocks;
     config.blockDim = block_dim;
@@ -703,12 +687,17 @@ void topkGatingSoftplusSqrtLauncherHelper(
                        input_ids, tid2eid, is_padding, bias_vl,
                        image_sentinel_lo);
 #else
-    kernel<<<num_blocks, block_dim, 0, stream>>>(
+    kernel<<<num_blocks, block_dim, 0, stream> > >(
         input, finished, output, num_rows, indices, source_row, k, start_expert,
         end_expert, renormalize, routed_scaling_factor, correction_bias,
         input_ids, tid2eid, is_padding, bias_vl, image_sentinel_lo);
 #endif
-  })
+  };
+  if (use_hash) {
+    launch.template operator()<true>();
+  } else {
+    launch.template operator()<false>();
+  }
 }
 
 #ifndef USE_ROCM

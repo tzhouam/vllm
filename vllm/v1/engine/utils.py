@@ -1380,7 +1380,7 @@ def wait_for_engine_startup(
         and not parallel_config.data_parallel_external_lb
     )
 
-    # [edge-infer W0 windows patch] sentinel-poll: Process.sentinel is a pipe fd on POSIX but a
+    # Process.sentinel is a pipe fd on POSIX but a
     # process HANDLE on Windows -- not a socket, so zmq_poll rejects the whole
     # poll set. Skip registration there; liveness is checked below instead.
     _win_sentinels = sys.platform == "win32"
@@ -1401,11 +1401,9 @@ def wait_for_engine_startup(
             poller.register(fd, zmq.POLLIN)
 
     while any(conn_pending) or any(start_pending):
-        events = poller.poll(
-            500 if _win_sentinels else STARTUP_POLL_PERIOD_MS
-        )
+        events = poller.poll(500 if _win_sentinels else STARTUP_POLL_PERIOD_MS)
         if _win_sentinels and not events:
-            # [edge-infer W0 windows patch] the sentinels above would have reported this on POSIX.
+            # On POSIX the sentinels above would have reported this.
             _dead = {}
             if isinstance(launch.engine_manager, CoreEngineProcManager):
                 _dead.update(launch.engine_manager.finished_procs())

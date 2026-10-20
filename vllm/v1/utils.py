@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import argparse
+import asyncio
 import contextlib
 import json
 import multiprocessing
+import sys
 import threading
 import time
 import weakref
@@ -23,13 +25,6 @@ from typing import (
 )
 
 import torch
-# [edge-infer W0 windows patch] uvloop: no Windows wheels; bind lazily so importing this
-# module does not require it. The only use is in an API-server entry point.
-def __getattr__(_name):
-    if _name == 'uvloop':
-        import uvloop as _u
-        return _u
-    raise AttributeError(_name)
 from torch.autograd.profiler import record_function
 
 import vllm.envs as envs
@@ -530,9 +525,16 @@ def run_api_server_worker_proc(
     set_process_title("APIServer", str(server_index))
     decorate_logs()
 
-    uvloop.run(
-        run_server_worker(listen_address, sock, args, client_config, **uvicorn_kwargs)
-    )
+    if sys.platform == "win32":
+
+        def run(coro):
+            return asyncio.run(coro, loop_factory=asyncio.SelectorEventLoop)
+    else:
+        import uvloop
+
+        run = uvloop.run
+
+    run(run_server_worker(listen_address, sock, args, client_config, **uvicorn_kwargs))
 
 
 def wait_for_completion_or_failure(

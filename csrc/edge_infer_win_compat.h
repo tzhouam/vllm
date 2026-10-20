@@ -25,17 +25,18 @@ typedef SSIZE_T ssize_t;
 
   // [edge-infer W7] CUtensorMap alignment. CUDA 13's cuda.h declares the TMA
   // descriptor `alignas(128)` (CUDA 12 said 64). Every CUTLASS TMA kernel takes
-  // its Params -- which embed CUtensorMap -- as a by-value __global__ parameter,
-  // and nvcc's host pass declares that same by-value signature for cl.exe, which
-  // rejects any parameter aligned above 64 bytes (C2719, measured: 16/32/64 pass,
-  // 128 fails). __grid_constant__ does not change the host signature (measured).
-  // So under MSVC the only way to compile a TMA kernel is for CUtensorMap to be
-  // 64-byte aligned, consistently in the host and device passes. The documented
-  // requirement is 64: cuTensorMapEncode* say "tensorMap address must be aligned
-  // to 64 bytes", and CUDA 12 shipped exactly that. Done by including cuda.h once
-  // here with `alignas` rewritten for the duration of that include only; it is
-  // the header's sole alignas. Whether 64 is also enough for the hardware on
-  // sm_120 is what verify_cutlass.py's FP8 GEMM check answers, not this comment.
+  // its Params -- which embed CUtensorMap -- as a by-value __global__
+  // parameter, and nvcc's host pass declares that same by-value signature for
+  // cl.exe, which rejects any parameter aligned above 64 bytes (C2719,
+  // measured: 16/32/64 pass, 128 fails). __grid_constant__ does not change the
+  // host signature (measured). So under MSVC the only way to compile a TMA
+  // kernel is for CUtensorMap to be 64-byte aligned, consistently in the host
+  // and device passes. The documented requirement is 64: cuTensorMapEncode* say
+  // "tensorMap address must be aligned to 64 bytes", and CUDA 12 shipped
+  // exactly that. Done by including cuda.h once here with `alignas` rewritten
+  // for the duration of that include only; it is the header's sole alignas.
+  // Whether 64 is also enough for the hardware on sm_120 is what
+  // verify_cutlass.py's FP8 GEMM check answers, not this comment.
   #if __has_include(<cuda.h>)
     #pragma push_macro("alignas")
     #define alignas(x) alignas(64)

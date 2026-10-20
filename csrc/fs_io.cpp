@@ -18,12 +18,13 @@
 #ifdef _WIN32
   #include <io.h>
   #include <BaseTsd.h>
-typedef SSIZE_T ssize_t;  // POSIX type, absent from MSVC
+typedef SSIZE_T
+    ssize_t;  // POSIX type, absent from MSVC
   #ifndef O_BINARY
     #define O_BINARY _O_BINARY
   #endif
   #ifndef F_OK
-    // _access() takes the same mode values; 0 is the existence check.
+              // _access() takes the same mode values; 0 is the existence check.
     #define F_OK 0
   #endif
 #else
@@ -73,8 +74,8 @@ inline int _store_block(const char* tmp_path, const char* dest_path,
 
   const int o_direct_flag = use_o_direct ? kODirectFlag : 0;
   const int fd = open(
-      tmp_path, O_CREAT | O_EXCL | O_WRONLY | O_TRUNC | O_BINARY | o_direct_flag,
-      0644);
+      tmp_path,
+      O_CREAT | O_EXCL | O_WRONLY | O_TRUNC | O_BINARY | o_direct_flag, 0644);
   if (fd < 0) {
     return errno;
   }

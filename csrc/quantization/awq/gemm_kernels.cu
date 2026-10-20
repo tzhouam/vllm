@@ -177,11 +177,11 @@ __global__ void __launch_bounds__(64)
     for (int k_0_1 = 0; k_0_1 < 2; ++k_0_1) {
       {
         unsigned int addr;
-        // [edge-infer W2] `__asm__ __volatile__` is the GNU alternate spelling of
-        // the inline-asm keywords; MSVC does not provide it, so nvcc's host pass
-        // sees an undeclared identifier. `asm volatile` is the spelling nvcc
-        // documents for inline PTX and works on every host compiler. Applied to
-        // all 10 sites in this file; the PTX itself is untouched.
+        // [edge-infer W2] `__asm__ __volatile__` is the GNU alternate spelling
+        // of the inline-asm keywords; MSVC does not provide it, so nvcc's host
+        // pass sees an undeclared identifier. `asm volatile` is the spelling
+        // nvcc documents for inline PTX and works on every host compiler.
+        // Applied to all 10 sites in this file; the PTX itself is untouched.
         asm volatile(
             "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, "
             "addr; }\n"

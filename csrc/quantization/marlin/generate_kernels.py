@@ -277,8 +277,7 @@ def generate_new_kernels():
                 # and no branch ever assigns MarlinDefault, so the guard is false
                 # for precisely the branches the `else` chain used to skip.
                 kernel_selector_str += (
-                    f"if (kernel == MarlinDefault && ({conditions}))\n"
-                    "  kernel = "
+                    f"if (kernel == MarlinDefault && ({conditions}))\n  kernel = "
                 )
 
                 kernel_template2 = (

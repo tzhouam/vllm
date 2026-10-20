@@ -86,7 +86,6 @@ extern "C" {
 typedef SSIZE_T ssize_t;
 #endif
 
-
 #include <sys/types.h>
 
 char error_msg[10240];  // 10KB buffer to store error messages

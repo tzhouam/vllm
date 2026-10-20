@@ -347,8 +347,8 @@ constexpr auto HALF = torch::headeronly::ScalarType::Half;
 constexpr auto BF16 = torch::headeronly::ScalarType::BFloat16;
 // [edge-infer W7] were FLOAT / INT. <windef.h> (reached through <BaseTsd.h>
 // in the Windows compat pre-include) typedefs FLOAT and INT at global scope, so
-// nvcc reports '"FLOAT" has already been declared in the current scope'. Renamed;
-// same values, same uses.
+// nvcc reports '"FLOAT" has already been declared in the current scope'.
+// Renamed; same values, same uses.
 constexpr auto FLOAT_ST = torch::headeronly::ScalarType::Float;
 constexpr auto INT_ST = torch::headeronly::ScalarType::Int;
 constexpr auto UINT8_ST = torch::headeronly::ScalarType::Byte;
